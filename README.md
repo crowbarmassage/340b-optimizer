@@ -72,7 +72,7 @@ The application will open in your browser at `http://localhost:8501`.
 
 ### Quick Start (Recommended)
 
-1. Click **"Load Sample Data"** on the Upload page
+1. Click **"Load & Process Sample Data"** on the Upload page
 2. Navigate to **Dashboard** using the sidebar
 3. Explore optimization opportunities for 34,229 drugs
 
@@ -85,6 +85,8 @@ Upload the following files through the web interface:
 | Product Catalog (XLSX) | 340B contract pricing | NDC, Contract Cost, AWP (or Medispan AWP) |
 | ASP Pricing File (CSV) | Medicare payment limits | HCPCS Code, Payment Limit |
 | NDC-HCPCS Crosswalk (CSV) | Billing code mapping | NDC (or NDC2), HCPCS Code (or _2025_CODE) |
+| NOC Pricing File (CSV) | Fallback pricing for drugs without J-codes | Drug Generic Name, Payment Limit |
+| NOC Crosswalk (CSV) | Fallback NDC mapping for NOC drugs | NDC, Drug Generic Name |
 | NADAC Statistics (CSV) | Penny pricing detection | ndc, total_discount_340b_pct |
 | Biologics Logic Grid (XLSX) | Loading dose profiles | Drug Name, Year 1 Fills, Year 2+ Fills |
 
@@ -92,13 +94,12 @@ Upload the following files through the web interface:
 
 ### Workflow
 
-1. **Upload** your data files (or use sample data)
-2. **Process** the data using the "Process Data" button
-3. **Navigate** to Dashboard to see ranked opportunities
-4. **Filter** by IRA status, penny pricing, minimum margin delta
-5. **Search** for specific drugs (< 30 seconds lookup)
-6. **Adjust** capture rate slider to stress-test assumptions
-7. **View Details** for individual drug analysis with provenance chain
+1. **Upload** your data files (or click "Load & Process Sample Data" for demo)
+2. **Navigate** to Dashboard to see ranked opportunities
+3. **Filter** by IRA status, penny pricing, minimum margin delta
+4. **Search** for specific drugs (< 30 seconds lookup)
+5. **Adjust** capture rate slider to stress-test assumptions
+6. **View Details** for individual drug analysis with provenance chain
 
 ## Development
 
@@ -174,6 +175,8 @@ pre-commit run --all-files
 │   ├── product_catalog.xlsx   # 34,229 drugs
 │   ├── asp_pricing.csv        # CMS ASP pricing
 │   ├── asp_crosswalk.csv      # NDC-HCPCS mapping
+│   ├── noc_pricing.csv        # NOC fallback pricing
+│   ├── noc_crosswalk.csv      # NOC NDC mapping
 │   ├── ndc_nadac_master_statistics.csv
 │   └── biologics_logic_grid.xlsx
 └── .streamlit/config.toml     # Streamlit configuration
@@ -241,6 +244,12 @@ Core Module Coverage:
 - Catalog requires: NDC, Contract Cost, AWP (or "Medispan AWP")
 - ASP files may contain "N/A" values - these are safely skipped
 - Crosswalk join rate is ~14% (expected for infusible drugs only)
+
+### NOC (Not Otherwise Classified) Fallback
+- NOC files provide pricing for drugs without permanent J-codes
+- When a drug has no ASP crosswalk match, the system checks NOC crosswalk
+- NOC pricing uses the same ASP+6%/ASP+15% formulas for margin calculation
+- NOC files are optional - system works without them but won't price unmapped drugs
 
 ### Streamlit Specifics
 - Navigation uses sidebar radio buttons (not page-based routing)

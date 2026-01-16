@@ -913,6 +913,12 @@ This application does not expose external HTTP APIs. The internal data flow is:
 │   │ (47k rows)        │  │ (8k mappings)     │  │ (64 drugs)        │       │
 │   └───────────────────┘  └───────────────────┘  └───────────────────┘       │
 │                                                                              │
+│   ┌───────────────────┐  ┌───────────────────┐                              │
+│   │ NOC Pricing       │  │ NOC Crosswalk     │  (Optional fallback for      │
+│   │ (Payment limits   │  │ (NDC mappings for │   drugs without J-codes)     │
+│   │  for NOC drugs)   │  │  NOC drugs)       │                              │
+│   └───────────────────┘  └───────────────────┘                              │
+│                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -991,9 +997,10 @@ This application does not expose external HTTP APIs. The internal data flow is:
 | Feature | Status | Notes |
 |---------|--------|-------|
 | File upload interface | ✅ Complete | XLSX/CSV with validation |
-| Sample data loading | ✅ Complete | One-click demo experience |
+| Sample data loading | ✅ Complete | One-click "Load & Process" demo |
 | Schema validation | ✅ Complete | Clear error messages |
 | NDC-HCPCS crosswalk | ✅ Complete | ~14% match rate (infusibles) |
+| NOC fallback pricing | ✅ Complete | For drugs without J-codes |
 | Retail margin calculation | ✅ Complete | AWP × 0.85 formula |
 | Medicare margin (ASP+6%) | ✅ Complete | With billing units |
 | Commercial margin (ASP+15%) | ✅ Complete | With billing units |
