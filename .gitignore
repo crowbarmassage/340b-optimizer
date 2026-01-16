@@ -34,7 +34,10 @@ Thumbs.db
 data/uploads/
 *.xlsx
 *.csv
-!data/sample/*.csv
+!data/sample/asp_pricing.csv
+!data/sample/asp_crosswalk.csv
+# Exclude large NADAC file (14MB)
+data/sample/ndc_nadac_master_statistics.csv
 
 # Streamlit
 .streamlit/secrets.toml

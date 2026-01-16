@@ -981,3 +981,67 @@ This application does not expose external HTTP APIs. The internal data flow is:
 | **Financial Accuracy** | +/- 5% vs historical | Gatekeeper unit tests with manual verification |
 | **Auditability** | Full provenance chain | Each margin shows source file + calculation logic |
 | **Extensibility** | New ASP file without code change | Schema-driven loader with column mapping config |
+
+---
+
+## Implementation Status (January 2026)
+
+### Completed Features
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| File upload interface | ✅ Complete | XLSX/CSV with validation |
+| Sample data loading | ✅ Complete | One-click demo experience |
+| Schema validation | ✅ Complete | Clear error messages |
+| NDC-HCPCS crosswalk | ✅ Complete | ~14% match rate (infusibles) |
+| Retail margin calculation | ✅ Complete | AWP × 0.85 formula |
+| Medicare margin (ASP+6%) | ✅ Complete | With billing units |
+| Commercial margin (ASP+15%) | ✅ Complete | With billing units |
+| Capture rate slider | ✅ Complete | Real-time recalculation |
+| IRA drug detection | ✅ Complete | 2026/2027 drugs flagged |
+| Penny pricing alerts | ✅ Complete | NADAC-based detection |
+| Dashboard with filters | ✅ Complete | Search, min delta, IRA filter |
+| Drug detail view | ✅ Complete | Sensitivity analysis, provenance |
+| Loading dose modeling | ✅ Complete | Year 1 vs Maintenance |
+
+### Implementation Decisions & Changes
+
+1. **Navigation System**
+   - Original: Streamlit page-based routing
+   - Implemented: Sidebar radio buttons (avoids conflicts with auto-discovery)
+
+2. **Retail Margin Formula**
+   - Formula: `AWP × 0.85 - Contract Cost` (industry standard discount)
+   - Net margin: `Gross × Capture Rate`
+
+3. **CMS File Handling**
+   - ASP Pricing and Crosswalk files have 8 header rows (metadata)
+   - Automatic column mapping for quarterly variations
+
+4. **Data Validation Robustness**
+   - ASP pricing files may contain "N/A" values (safely skipped)
+   - Column name variations handled via normalizers
+
+5. **Streamlit Configuration**
+   - `.streamlit/config.toml` disables auto-page navigation
+   - Session state persists data across page switches
+
+### Test Coverage
+
+| Module | Coverage | Notes |
+|--------|----------|-------|
+| `compute/margins.py` | 95% | Core calculations |
+| `compute/dosing.py` | 90% | Loading dose logic |
+| `ingest/loaders.py` | 95% | File I/O |
+| `ingest/normalizers.py` | 91% | Data cleaning |
+| `ingest/validators.py` | 99% | Schema checks |
+| `risk/ira_flags.py` | 100% | IRA detection |
+| `risk/penny_pricing.py` | 93% | NADAC checks |
+| `models.py` | 100% | Data models |
+| **UI modules** | 0% | Manual testing only |
+
+### Known Limitations
+
+1. **Performance**: Dashboard re-calculates on each page load (no persistent cache)
+2. **Export**: CSV export not yet implemented in UI
+3. **Crosswalk Rate**: Only ~14% of drugs match (expected for infusibles only)

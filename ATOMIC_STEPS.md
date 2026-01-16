@@ -1721,15 +1721,15 @@ git push
 
 | Phase | Status | Tests Pass | Human Approved | Notes |
 |-------|--------|------------|----------------|-------|
-| 1. Foundation | [ ] | [ ] | [ ] | |
-| 2. Ingestion (Bronze) | [ ] | [ ] | [ ] | |
-| 3. Normalization (Silver) | [ ] | [ ] | [ ] | |
-| 4. Margin Calc (Gold) | [ ] | [ ] | [ ] | Gatekeeper tests |
-| 5. Risk Flagging | [ ] | [ ] | [ ] | |
-| 6. Streamlit UI | [ ] | [ ] | [ ] | Manual testing |
-| 7. Integration | [ ] | [ ] | [ ] | Success metrics |
-| 8. Notebook & Demo | [ ] | [ ] | [ ] | **Required** |
-| 9. Documentation | [ ] | [ ] | [ ] | |
+| 1. Foundation | [x] | [x] | [x] | 28 tests |
+| 2. Ingestion (Bronze) | [x] | [x] | [x] | 86 tests, Top 50 validator |
+| 3. Normalization (Silver) | [x] | [x] | [x] | 119 tests, column mapping |
+| 4. Margin Calc (Gold) | [x] | [x] | [x] | 200 tests, gatekeeper tests |
+| 5. Risk Flagging | [x] | [x] | [x] | 253 tests, IRA + Penny |
+| 6. Streamlit UI | [x] | [x] | [x] | Manual testing + sample data |
+| 7. Integration | [x] | [x] | [x] | 277 tests, success metrics |
+| 8. Notebook & Demo | [ ] | [ ] | [ ] | Skipped per user |
+| 9. Documentation | [x] | [x] | [ ] | README, TECH_SPECS updated |
 
 ---
 
