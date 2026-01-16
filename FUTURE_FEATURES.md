@@ -1,6 +1,6 @@
 # FUTURE_FEATURES.md — Deferred Features for v2+
 
-> **Version:** 1.0
+> **Version:** 1.1
 > **Last Updated:** January 15, 2026
 
 This document tracks features explicitly out of scope for v1, with rationale and prerequisites.
@@ -25,23 +25,109 @@ This document tracks features explicitly out of scope for v1, with rationale and
 - Validated Year 1 vs Maintenance calculations
 - UI framework for parameter input
 
+**v2 Enhancements**:
+
+#### 1a. Practice Value Estimation
+
+**Description**: Upload a physician's patient roster (de-identified) to estimate the 340B value of onboarding that practice. Calculate projected annual margin based on:
+- Patient drug mix (which drugs patients are currently prescribed)
+- Payer mix (Medicare, Commercial, Medicaid distribution)
+- Visit frequency and adherence patterns
+
+**Use Case**: Health system evaluating acquisition or partnership with specialty physician practice. Answer: "What is the 340B opportunity if we bring Dr. Smith's oncology practice under our covered entity?"
+
+**Data Inputs**:
+| Field | Required | Description |
+|-------|----------|-------------|
+| Drug/NDC | Yes | Current prescriptions |
+| Patient Count | Yes | Number of patients on each drug |
+| Payer Type | Recommended | Medicare/Commercial/Medicaid |
+| Doses/Year | Optional | Override default dosing assumptions |
+
+**Output**:
+- Total projected annual margin for the practice
+- Per-drug breakdown with pathway recommendations
+- Sensitivity analysis at different capture rates
+- Risk summary (IRA exposure, penny pricing exposure)
+
 ---
 
-### 2. Automated CMS ASP File Ingestion
+### 2. Database & Automated Data Ingestion
 
-**Description**: Automatically fetch quarterly CMS ASP pricing files from CMS.gov instead of manual upload.
+**Description**: Replace manual file uploads with automated data pulls from enterprise databases and external APIs.
 
 **Why Deferred**:
-- CMS file URLs change each quarter (no stable API)
+- v1 designed for standalone use without infrastructure dependencies
 - Manual upload provides explicit human verification
-- Most data sources (Wholesaler Catalog, Financial Matrix) are proprietary anyway
+- Database connectivity adds deployment complexity
 - v1 prioritizes accuracy over automation
 
-**Rough Complexity**: Low-Medium (1-2 weeks)
+**Rough Complexity**: Medium-High (3-5 weeks)
 
 **Prerequisites from v1**:
 - Schema validation passing (Phase 2)
 - Clear file format expectations documented
+- Data normalization pipeline proven stable
+
+**v2 Enhancements**:
+
+#### 2a. Automated CMS ASP File Ingestion
+
+**Description**: Automatically fetch quarterly CMS ASP pricing files from CMS.gov instead of manual upload.
+
+**Implementation Notes**:
+- CMS file URLs change each quarter (no stable API)
+- Will require scheduled job to check for new files
+- Include version detection to avoid re-processing
+
+#### 2b. Relational Database Connectivity
+
+**Description**: Pull data directly from enterprise databases (SQL Server, PostgreSQL, Oracle, MySQL) instead of file uploads.
+
+**Use Case**: Enterprise deployment where product catalog, contract costs, and wholesaler data already exist in a data warehouse or ERP system.
+
+**Supported Data Sources**:
+| Source Type | Connection Method | Use For |
+|-------------|-------------------|---------|
+| SQL Server | pyodbc / SQLAlchemy | Product catalog, contract costs |
+| PostgreSQL | psycopg2 / SQLAlchemy | Product catalog, contract costs |
+| Oracle | cx_Oracle / SQLAlchemy | Wholesaler data |
+| MySQL/MariaDB | mysql-connector / SQLAlchemy | General purpose |
+| Snowflake | snowflake-connector | Enterprise data warehouse |
+| Databricks | databricks-sql-connector | Analytics platform |
+
+**Configuration**:
+```yaml
+data_sources:
+  product_catalog:
+    type: sqlserver
+    connection_string: ${DATABASE_URL}
+    query: "SELECT * FROM dbo.DrugCatalog WHERE Active = 1"
+    refresh_interval: daily
+
+  asp_pricing:
+    type: api
+    endpoint: https://internal-api/asp/current
+    auth: bearer_token
+```
+
+#### 2c. Cloud Storage Integration
+
+**Description**: Pull data files from S3, Azure Blob, or GCS instead of local upload.
+
+**Supported Providers**:
+- AWS S3 (boto3)
+- Azure Blob Storage (azure-storage-blob)
+- Google Cloud Storage (google-cloud-storage)
+
+#### 2d. API-Based Data Sources
+
+**Description**: Connect to internal or third-party APIs for real-time pricing data.
+
+**Potential Integrations**:
+- Medi-Span API (drug pricing)
+- First Databank (clinical data)
+- Internal pharmacy system APIs
 
 ---
 
@@ -153,9 +239,12 @@ This document tracks features explicitly out of scope for v1, with rationale and
 | Feature | Business Value | Technical Complexity | Data Availability | Priority |
 |---------|---------------|---------------------|-------------------|----------|
 | Patient Cohort Simulations | High | Medium-High | Internal | P1 |
+| → Practice Value Estimation | Very High | Medium | User upload | P1 |
+| Database & Data Ingestion | High | Medium-High | Internal | P1 |
+| → Relational DB Connectivity | High | Medium | Internal | P1 |
+| → Cloud Storage Integration | Medium | Low | Internal | P2 |
 | Historical Trend Analysis | Medium | Medium | Internal | P2 |
 | Biosimilar Switch Analysis | Medium | Low-Medium | Internal | P2 |
-| Automated CMS Ingestion | Low | Low | Public | P3 |
 | Multi-Site Portfolio | High | High | Internal | P3 |
 | PBM Network Eligibility | High | High | Requires acquisition | P4 |
 | EHR Integration | Medium | Very High | Requires partnerships | P5 |
