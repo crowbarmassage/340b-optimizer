@@ -164,21 +164,23 @@ def render_upload_page() -> None:
     if _check_sample_data_available():
         st.markdown("### Quick Start")
         st.info(
-            "Sample data files are available. Click below to load them instantly "
-            "and explore the app without uploading your own files."
+            "Sample data files are available. Click below to load and process them "
+            "instantly, then explore the app without uploading your own files."
         )
         col1, col2 = st.columns([1, 3])
         with col1:
-            if st.button("Load Sample Data", type="primary"):
-                with st.spinner("Loading sample data..."):
+            if st.button("Load & Process Sample Data", type="primary"):
+                with st.spinner("Loading and processing sample data..."):
                     _load_sample_data()
-                st.success("Sample data loaded successfully!")
+                    _process_uploaded_data()
+                st.success("Sample data loaded and processed! Navigate to Dashboard.")
                 st.rerun()
         with col2:
             st.caption(
                 "Includes: Product Catalog, ASP Pricing, Crosswalk, NADAC, "
                 "Biologics Logic Grid, and NOC fallback files"
             )
+
         st.markdown("---")
 
     # File upload sections
@@ -532,7 +534,7 @@ def _render_validation_summary() -> None:
             "Select **Dashboard** from the sidebar to view optimization opportunities."
         )
 
-        if st.button("Process Data", type="primary"):
+        if st.button("Process Data", type="primary", key="process_data_bottom"):
             with st.spinner("Processing data..."):
                 _process_uploaded_data()
             st.success("Data processed! Use sidebar to navigate to Dashboard.")

@@ -82,12 +82,20 @@ def render_drug_detail_page() -> None:
 
 def _get_or_search_drug() -> Drug | None:
     """Get selected drug from session state or show search."""
-    # Check if drug was selected from dashboard
+    # Check if drug was selected from dashboard or previous search
     selected_ndc = st.session_state.get("selected_drug")
 
     if selected_ndc:
         drug = _lookup_drug_by_ndc(selected_ndc)
         if drug:
+            # Show current drug with option to search new
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.info(f"Currently viewing: **{drug.drug_name}** ({drug.ndc_formatted})")
+            with col2:
+                if st.button("🔍 Search New Drug", type="secondary"):
+                    st.session_state.selected_drug = None
+                    st.rerun()
             return drug
 
     # Show search interface
@@ -109,7 +117,7 @@ def _get_or_search_drug() -> Drug | None:
         drug = _search_drug(search)
         if drug:
             st.session_state.selected_drug = drug.ndc
-            return drug
+            st.rerun()
         else:
             st.error("Drug not found. Please check the name or NDC.")
 
@@ -120,20 +128,20 @@ def _get_or_search_drug() -> Drug | None:
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Demo: HUMIRA"):
+        if st.button("Demo: HUMIRA", key="demo_humira"):
             drug = _search_drug("HUMIRA")
             if drug:
                 st.session_state.selected_drug = drug.ndc
-                return drug
+                st.rerun()
             else:
                 st.warning("HUMIRA not found in uploaded data.")
 
     with col2:
-        if st.button("Demo: ENBREL (IRA 2026)"):
+        if st.button("Demo: ENBREL (IRA 2026)", key="demo_enbrel"):
             drug = _search_drug("ENBREL")
             if drug:
                 st.session_state.selected_drug = drug.ndc
-                return drug
+                st.rerun()
             else:
                 st.warning("ENBREL not found in uploaded data.")
 
