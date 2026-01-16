@@ -17,7 +17,15 @@ from thefuzz import fuzz  # type: ignore[import-untyped]
 logger = logging.getLogger(__name__)
 
 # Columns that should always be read as strings to preserve leading zeros
-NDC_COLUMN_NAMES = {"NDC", "NDC2", "ndc", "ndc2", "Ndc"}
+NDC_COLUMN_NAMES = {
+    "NDC",
+    "NDC2",
+    "ndc",
+    "ndc2",
+    "Ndc",
+    "NDC or ALTERNATE ID",  # NOC crosswalk
+    "Product Catalog NDC",  # Wholesaler catalog
+}
 
 
 # Column mapping configurations for different data sources

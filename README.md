@@ -89,15 +89,20 @@ Upload the following files through the web interface:
 | NOC Crosswalk (CSV) | Fallback NDC mapping for NOC drugs | NDC, Drug Generic Name |
 | NADAC Statistics (CSV) | Penny pricing detection | ndc, total_discount_340b_pct |
 | Biologics Logic Grid (XLSX) | Loading dose profiles | Drug Name, Year 1 Fills, Year 2+ Fills |
+| AWP Reimbursement Matrix (XLSX) | Payer-specific AWP multipliers | Drug Categories, Summary sheets |
+| Wholesaler Catalog (XLSX) | Retail price validation | Product Catalog NDC, Unit Price |
+| IRA Drug List (CSV) | IRA negotiated drugs | drug_name, ira_year, description |
 
-**Note**: CMS files (ASP Pricing, Crosswalk) have 8 header rows that are automatically skipped.
+**Notes**:
+- CMS files (ASP Pricing, Crosswalk) have 8 header rows that are automatically skipped
+- NDC columns are automatically read as strings to preserve leading zeros
 
 ### Workflow
 
 1. **Upload** your data files (or click "Load & Process Sample Data" for demo)
 2. **Navigate** to Dashboard to see ranked opportunities
 3. **Filter** by IRA status, penny pricing, minimum margin delta
-4. **Search** for specific drugs (< 30 seconds lookup)
+4. **Search** for specific drugs by name or NDC (supports both `12345678901` and `12345-6789-01` formats)
 5. **Adjust** capture rate slider to stress-test assumptions
 6. **View Details** for individual drug analysis with provenance chain
 
@@ -178,7 +183,11 @@ pre-commit run --all-files
 │   ├── noc_pricing.csv        # NOC fallback pricing
 │   ├── noc_crosswalk.csv      # NOC NDC mapping
 │   ├── ndc_nadac_master_statistics.csv
-│   └── biologics_logic_grid.xlsx
+│   ├── biologics_logic_grid.xlsx
+│   ├── Ravenswood_AWP_Reimbursement_Matrix.xlsx
+│   ├── wholesaler_catalog.xlsx
+│   ├── ira_drug_list.csv      # IRA 2026/2027 drugs (data-driven)
+│   └── cms_crosswalk_reference.csv  # CMS field descriptions
 └── .streamlit/config.toml     # Streamlit configuration
 ```
 

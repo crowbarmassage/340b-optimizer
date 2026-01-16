@@ -7,8 +7,23 @@ import polars as pl
 import streamlit as st
 
 from optimizer_340b.compute.margins import analyze_drug_margin
+from optimizer_340b.compute.retail_pricing import (
+    DrugCategory,
+    classify_drug_category,
+    load_drug_category_lookup,
+)
+from optimizer_340b.ingest.normalizers import normalize_ndc
 from optimizer_340b.models import Drug, MarginAnalysis
 from optimizer_340b.risk import check_ira_status
+from optimizer_340b.risk.penny_pricing import (
+    INFLATION_PENALTY_THRESHOLD,
+    PENNY_COST_OVERRIDE,
+    build_nadac_lookup,
+)
+from optimizer_340b.risk.retail_validation import (
+    build_retail_validation_lookup,
+    load_wholesaler_catalog,
+)
 from optimizer_340b.ui.components.capture_slider import render_capture_slider
 
 logger = logging.getLogger(__name__)
@@ -147,6 +162,7 @@ def _calculate_opportunities(capture_rate: Decimal) -> list[MarginAnalysis]:
     nadac = uploaded.get("nadac")
     noc_pricing = uploaded.get("noc_pricing")
     noc_crosswalk = uploaded.get("noc_crosswalk")
+    ravenswood_categories = uploaded.get("ravenswood_categories")
 
     if catalog is None:
         return []
@@ -157,11 +173,24 @@ def _calculate_opportunities(capture_rate: Decimal) -> list[MarginAnalysis]:
     # Prepare lookup tables
     hcpcs_lookup = _build_hcpcs_lookup(crosswalk, asp_pricing)
     noc_lookup = _build_noc_lookup(noc_crosswalk, noc_pricing)
-    nadac_lookup = _build_nadac_lookup(nadac)
+
+    # Build enhanced NADAC lookup with penny cost override and inflation
+    if nadac is not None:
+        nadac_enhanced = build_nadac_lookup(nadac)
+    else:
+        nadac_enhanced = {}
+
+    # Build drug category lookup from Ravenswood (if available)
+    if ravenswood_categories is not None:
+        category_lookup = load_drug_category_lookup(ravenswood_categories)
+    else:
+        category_lookup = {}
 
     for row in catalog.iter_rows(named=True):
         try:
-            drug = _row_to_drug(row, hcpcs_lookup, nadac_lookup, noc_lookup)
+            drug = _row_to_drug(
+                row, hcpcs_lookup, nadac_enhanced, noc_lookup, category_lookup
+            )
             if drug is not None:
                 analysis = analyze_drug_margin(drug, capture_rate)
                 analyses.append(analysis)
@@ -235,30 +264,6 @@ def _build_hcpcs_lookup(
     return lookup
 
 
-def _build_nadac_lookup(nadac: pl.DataFrame | None) -> dict[str, dict[str, object]]:
-    """Build NADAC lookup for penny pricing detection.
-
-    Returns:
-        Dictionary mapping normalized NDC to NADAC info.
-    """
-    if nadac is None:
-        return {}
-
-    lookup: dict[str, dict[str, object]] = {}
-
-    for row in nadac.iter_rows(named=True):
-        ndc = str(row.get("ndc", "")).replace("-", "").strip()
-        discount = row.get("total_discount_340b_pct")
-        penny = row.get("penny_pricing", False)
-
-        if ndc:
-            is_penny = penny or (discount is not None and float(discount) >= 95.0)
-            lookup[ndc] = {
-                "discount_pct": discount,
-                "penny_pricing": is_penny,
-            }
-
-    return lookup
 
 
 def _build_noc_lookup(
@@ -324,14 +329,16 @@ def _row_to_drug(
     hcpcs_lookup: dict[str, dict[str, object]],
     nadac_lookup: dict[str, dict[str, object]],
     noc_lookup: dict[str, dict[str, object]] | None = None,
+    category_lookup: dict[str, DrugCategory] | None = None,
 ) -> Drug | None:
     """Convert a catalog row to a Drug object.
 
     Args:
         row: Row from catalog DataFrame.
         hcpcs_lookup: HCPCS/ASP lookup by NDC.
-        nadac_lookup: NADAC lookup by NDC.
+        nadac_lookup: Enhanced NADAC lookup with penny override and inflation.
         noc_lookup: NOC fallback lookup by NDC (for drugs without J-codes).
+        category_lookup: Drug category lookup from Ravenswood matrix.
 
     Returns:
         Drug object or None if invalid.
@@ -341,7 +348,7 @@ def _row_to_drug(
     if not ndc:
         return None
 
-    ndc_normalized = ndc.replace("-", "").strip()
+    ndc_normalized = ndc.replace("-", "").strip().zfill(11)[-11:]
 
     # Get drug name (handle different column names)
     drug_name = (
@@ -383,13 +390,26 @@ def _row_to_drug(
             # NOC drugs use generic codes, mark as NOC for display
             hcpcs_code = "NOC"  # Indicates Not Otherwise Classified
 
-    # Lookup NADAC info
+    # Lookup NADAC info (enhanced with penny override and inflation)
     nadac_info = nadac_lookup.get(ndc_normalized, {})
-    penny_pricing = nadac_info.get("penny_pricing", False)
+    penny_pricing = nadac_info.get("is_penny_priced", False)
+
+    # Apply penny cost override per manifest:
+    # "If penny_pricing == 'Yes', override Cost_Basis to $0.01"
+    if penny_pricing and nadac_info.get("override_cost"):
+        contract_cost = nadac_info["override_cost"]
+        logger.debug(f"Applied penny cost override for NDC {ndc}: ${contract_cost}")
+
+    # Check for high inflation penalty (>20%)
+    inflation_penalty = nadac_info.get("inflation_penalty_pct")
+    has_inflation_flag = nadac_info.get("has_inflation_penalty", False)
 
     # Check IRA status
     ira_status = check_ira_status(str(drug_name))
     ira_flag = ira_status.get("is_ira_drug", False)
+
+    # Classify drug category (for retail pricing multiplier)
+    drug_category = classify_drug_category(str(drug_name), category_lookup)
 
     return Drug(
         ndc=ndc,
@@ -426,12 +446,15 @@ def _apply_filters(
     """
     filtered = analyses
 
-    # Search filter
+    # Search filter - supports drug name or NDC (11-digit or 5-4-2 format)
     if search_query:
         query = search_query.upper()
+        query_ndc = normalize_ndc(search_query)  # Normalize for NDC matching
         filtered = [
             a for a in filtered
-            if query in a.drug.drug_name.upper() or query in a.drug.ndc
+            if query in a.drug.drug_name.upper()
+            or query_ndc in a.drug.ndc
+            or query in a.drug.ndc  # Also check raw query for partial matches
         ]
 
     # IRA filter
@@ -470,12 +493,15 @@ def _apply_filters_with_context(
 
     filtered = analyses
 
-    # Search filter
+    # Search filter - supports drug name or NDC (11-digit or 5-4-2 format)
     if search_query:
         query = search_query.upper()
+        query_ndc = normalize_ndc(search_query)  # Normalize for NDC matching
         search_results = [
             a for a in filtered
-            if query in a.drug.drug_name.upper() or query in a.drug.ndc
+            if query in a.drug.drug_name.upper()
+            or query_ndc in a.drug.ndc
+            or query in a.drug.ndc  # Also check raw query for partial matches
         ]
         context["search_matches"] = len(search_results)
         filtered = search_results

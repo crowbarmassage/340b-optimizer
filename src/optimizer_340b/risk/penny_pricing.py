@@ -1,13 +1,17 @@
-"""Penny Pricing detection for 340B drugs.
+"""Penny Pricing and Inflation Penalty detection for 340B drugs.
 
 Penny Pricing occurs when a drug's NADAC (National Average Drug Acquisition Cost)
 is extremely low (often $0.01 or less), indicating the drug is effectively
 available at near-zero cost. These drugs should NOT appear in "Top Opportunities"
 because the 340B margin is already maximized with minimal room for improvement.
 
-Gatekeeper Test: Penny Pricing Alert
+Implementation Logic (from Proprietary Data Manifest):
+- Penny Logic: If penny_pricing == 'Yes', override Cost_Basis to $0.01
+- Inflation Logic: If inflation_penalty_pct > 20%, add flag: "High Inflation Penalty"
+
+Gatekeeper Tests:
 - Drugs with Penny Pricing = Yes should NOT appear in "Top Opportunities"
-- These drugs should be flagged with a warning explaining why
+- Drugs with high inflation penalty should be flagged
 """
 
 import logging
@@ -23,6 +27,12 @@ PENNY_THRESHOLD = Decimal("0.10")  # $0.10 per unit
 
 # High discount threshold for NADAC-based penny pricing detection
 HIGH_DISCOUNT_THRESHOLD = Decimal("95.0")  # 95% discount indicates penny pricing
+
+# Penny cost override value
+PENNY_COST_OVERRIDE = Decimal("0.01")  # $0.01 as per manifest
+
+# Inflation penalty threshold
+INFLATION_PENALTY_THRESHOLD = Decimal("20.0")  # 20% threshold
 
 
 @dataclass
@@ -271,4 +281,232 @@ def get_penny_pricing_summary(nadac_df: pl.DataFrame) -> dict[str, object]:
         "penny_priced_count": penny_count,
         "penny_priced_pct": round(penny_pct, 2),
         "flagged_ndcs": [item["ndc"] for item in flagged],
+    }
+
+
+@dataclass
+class NADACEnhancedStatus:
+    """Enhanced NADAC status with penny pricing and inflation flags.
+
+    Attributes:
+        ndc: NDC of the drug.
+        is_penny_priced: Whether the drug has penny pricing.
+        override_cost: Cost to use ($0.01 if penny priced, None otherwise).
+        has_inflation_penalty: Whether drug has high inflation penalty.
+        inflation_penalty_pct: The inflation penalty percentage.
+        warnings: List of warning messages.
+    """
+
+    ndc: str
+    is_penny_priced: bool
+    override_cost: Decimal | None
+    has_inflation_penalty: bool
+    inflation_penalty_pct: Decimal | None
+    warnings: list[str]
+
+
+def build_nadac_lookup(nadac_df: pl.DataFrame) -> dict[str, dict[str, object]]:
+    """Build comprehensive NADAC lookup with penny pricing and inflation data.
+
+    Args:
+        nadac_df: NADAC DataFrame with pricing data.
+
+    Returns:
+        Dictionary mapping NDC to NADAC data including:
+        - is_penny_priced: bool
+        - override_cost: Decimal or None
+        - has_inflation_penalty: bool
+        - inflation_penalty_pct: Decimal or None
+        - discount_340b_pct: Decimal or None
+    """
+    lookup: dict[str, dict[str, object]] = {}
+
+    # Check available columns
+    has_penny_col = "penny_pricing" in nadac_df.columns
+    has_discount_col = "total_discount_340b_pct" in nadac_df.columns
+    has_inflation_col = "inflation_penalty_pct" in nadac_df.columns
+
+    if "ndc" not in nadac_df.columns:
+        logger.warning("NADAC data missing 'ndc' column")
+        return lookup
+
+    for row in nadac_df.iter_rows(named=True):
+        ndc = str(row.get("ndc", "")).replace("-", "").strip()
+        if not ndc:
+            continue
+
+        # Normalize NDC to 11 digits
+        ndc_normalized = ndc.zfill(11)[-11:]
+
+        # Check penny pricing
+        is_penny = False
+        if has_penny_col:
+            penny_val = row.get("penny_pricing")
+            if penny_val and str(penny_val).upper() in ("YES", "TRUE", "1", "Y"):
+                is_penny = True
+
+        # Check discount percentage as alternative
+        discount_pct = None
+        if has_discount_col:
+            discount_val = row.get("total_discount_340b_pct")
+            if discount_val is not None:
+                try:
+                    discount_pct = Decimal(str(discount_val))
+                    if discount_pct >= HIGH_DISCOUNT_THRESHOLD:
+                        is_penny = True
+                except (ValueError, TypeError):
+                    pass
+
+        # Check inflation penalty
+        has_inflation = False
+        inflation_pct = None
+        if has_inflation_col:
+            inflation_val = row.get("inflation_penalty_pct")
+            if inflation_val is not None:
+                try:
+                    inflation_pct = Decimal(str(inflation_val))
+                    if inflation_pct > INFLATION_PENALTY_THRESHOLD:
+                        has_inflation = True
+                except (ValueError, TypeError):
+                    pass
+
+        # Build lookup entry
+        lookup[ndc_normalized] = {
+            "is_penny_priced": is_penny,
+            "override_cost": PENNY_COST_OVERRIDE if is_penny else None,
+            "has_inflation_penalty": has_inflation,
+            "inflation_penalty_pct": inflation_pct,
+            "discount_340b_pct": discount_pct,
+        }
+
+    logger.info(f"Built NADAC lookup with {len(lookup)} NDCs")
+
+    # Log summary
+    penny_count = sum(1 for v in lookup.values() if v["is_penny_priced"])
+    inflation_count = sum(1 for v in lookup.values() if v["has_inflation_penalty"])
+    logger.info(
+        f"NADAC summary: {penny_count} penny-priced, "
+        f"{inflation_count} with high inflation penalty"
+    )
+
+    return lookup
+
+
+def get_nadac_enhanced_status(
+    ndc: str,
+    nadac_lookup: dict[str, dict[str, object]],
+) -> NADACEnhancedStatus:
+    """Get enhanced NADAC status for a specific NDC.
+
+    Args:
+        ndc: NDC to look up (will be normalized).
+        nadac_lookup: Lookup from build_nadac_lookup().
+
+    Returns:
+        NADACEnhancedStatus with all flags and warnings.
+    """
+    # Normalize NDC
+    ndc_clean = ndc.replace("-", "").strip()
+    ndc_normalized = ndc_clean.zfill(11)[-11:]
+
+    # Look up in NADAC
+    nadac_data = nadac_lookup.get(ndc_normalized)
+
+    if not nadac_data:
+        return NADACEnhancedStatus(
+            ndc=ndc,
+            is_penny_priced=False,
+            override_cost=None,
+            has_inflation_penalty=False,
+            inflation_penalty_pct=None,
+            warnings=[],
+        )
+
+    # Build warnings
+    warnings = []
+    if nadac_data["is_penny_priced"]:
+        warnings.append(
+            f"💰 Penny Pricing: Cost overridden to ${PENNY_COST_OVERRIDE}"
+        )
+
+    if nadac_data["has_inflation_penalty"]:
+        pct = nadac_data["inflation_penalty_pct"]
+        warnings.append(
+            f"⚠️ High Inflation Penalty: {pct:.1f}% (exceeds {INFLATION_PENALTY_THRESHOLD}% threshold)"
+        )
+
+    return NADACEnhancedStatus(
+        ndc=ndc,
+        is_penny_priced=bool(nadac_data["is_penny_priced"]),
+        override_cost=nadac_data["override_cost"],
+        has_inflation_penalty=bool(nadac_data["has_inflation_penalty"]),
+        inflation_penalty_pct=nadac_data["inflation_penalty_pct"],
+        warnings=warnings,
+    )
+
+
+def apply_penny_cost_override(
+    contract_cost: Decimal,
+    ndc: str,
+    nadac_lookup: dict[str, dict[str, object]],
+) -> tuple[Decimal, bool]:
+    """Apply penny pricing cost override if applicable.
+
+    Per the Proprietary Data Manifest:
+    "If penny_pricing == 'Yes', override Cost_Basis to $0.01"
+
+    Args:
+        contract_cost: Original contract cost.
+        ndc: NDC of the drug.
+        nadac_lookup: Lookup from build_nadac_lookup().
+
+    Returns:
+        Tuple of (effective_cost, was_overridden).
+    """
+    ndc_clean = ndc.replace("-", "").strip()
+    ndc_normalized = ndc_clean.zfill(11)[-11:]
+
+    nadac_data = nadac_lookup.get(ndc_normalized)
+
+    if nadac_data and nadac_data["is_penny_priced"]:
+        logger.debug(
+            f"Penny pricing override for NDC {ndc}: "
+            f"${contract_cost} -> ${PENNY_COST_OVERRIDE}"
+        )
+        return PENNY_COST_OVERRIDE, True
+
+    return contract_cost, False
+
+
+def get_nadac_summary_with_inflation(
+    nadac_df: pl.DataFrame,
+) -> dict[str, object]:
+    """Get comprehensive NADAC summary including inflation data.
+
+    Args:
+        nadac_df: NADAC DataFrame with pricing data.
+
+    Returns:
+        Dictionary with comprehensive NADAC statistics.
+    """
+    lookup = build_nadac_lookup(nadac_df)
+
+    total_drugs = len(lookup)
+    penny_count = sum(1 for v in lookup.values() if v["is_penny_priced"])
+    inflation_count = sum(1 for v in lookup.values() if v["has_inflation_penalty"])
+    both_count = sum(
+        1 for v in lookup.values()
+        if v["is_penny_priced"] and v["has_inflation_penalty"]
+    )
+
+    penny_pct = (penny_count / total_drugs * 100) if total_drugs > 0 else 0
+    inflation_pct = (inflation_count / total_drugs * 100) if total_drugs > 0 else 0
+
+    return {
+        "total_drugs": total_drugs,
+        "penny_priced_count": penny_count,
+        "penny_priced_pct": round(penny_pct, 2),
+        "high_inflation_count": inflation_count,
+        "high_inflation_pct": round(inflation_pct, 2),
+        "both_flags_count": both_count,
     }

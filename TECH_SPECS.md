@@ -1,7 +1,7 @@
 # TECH_SPECS.md — 340B Site-of-Care Optimization Engine
 
-> **Version:** 1.0
-> **Last Updated:** January 15, 2026
+> **Version:** 1.1
+> **Last Updated:** January 16, 2026
 
 ---
 
@@ -87,8 +87,18 @@ The system uses a **batch pre-compute + interactive query** architecture where t
 │   ├── test_risk_flags.py
 │   └── test_integration.py          # End-to-end tests
 ├── data/
-│   └── sample/                      # Sample data for testing (gitignored originals)
-│       └── .gitkeep
+│   └── sample/                      # Sample data files
+│       ├── product_catalog.xlsx     # 34,229 drugs with contract pricing
+│       ├── asp_pricing.csv          # CMS ASP payment limits
+│       ├── asp_crosswalk.csv        # NDC-HCPCS billing code mapping
+│       ├── noc_pricing.csv          # NOC fallback pricing
+│       ├── noc_crosswalk.csv        # NOC NDC mapping
+│       ├── ndc_nadac_master_statistics.csv  # NADAC penny pricing data
+│       ├── biologics_logic_grid.xlsx # Loading dose profiles
+│       ├── Ravenswood_AWP_Reimbursement_Matrix.xlsx  # Payer multipliers
+│       ├── wholesaler_catalog.xlsx  # Retail price validation
+│       ├── ira_drug_list.csv        # IRA 2026/2027 drugs (data-driven)
+│       └── cms_crosswalk_reference.csv  # CMS field descriptions
 ├── notebooks/
 │   └── demo.ipynb                   # Google Colab demo
 ├── .env                             # Environment variables (gitignored)
@@ -919,6 +929,12 @@ This application does not expose external HTTP APIs. The internal data flow is:
 │   │  for NOC drugs)   │  │  NOC drugs)       │                              │
 │   └───────────────────┘  └───────────────────┘                              │
 │                                                                              │
+│   ┌───────────────────┐  ┌───────────────────┐  ┌───────────────────┐       │
+│   │ AWP Matrix        │  │ Wholesaler        │  │ IRA Drug List     │       │
+│   │ (Payer-specific   │  │ Catalog           │  │ (Data-driven      │       │
+│   │  multipliers)     │  │ (Retail valid.)   │  │  IRA 2026/2027)   │       │
+│   └───────────────────┘  └───────────────────┘  └───────────────────┘       │
+│                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1005,8 +1021,11 @@ This application does not expose external HTTP APIs. The internal data flow is:
 | Medicare margin (ASP+6%) | ✅ Complete | With billing units |
 | Commercial margin (ASP+15%) | ✅ Complete | With billing units |
 | Capture rate slider | ✅ Complete | Real-time recalculation |
-| IRA drug detection | ✅ Complete | 2026/2027 drugs flagged |
-| Penny pricing alerts | ✅ Complete | NADAC-based detection |
+| IRA drug detection | ✅ Complete | Data-driven from CSV (2026/2027 drugs) |
+| Penny pricing alerts | ✅ Complete | NADAC-based detection with cost override |
+| AWP payer multipliers | ✅ Complete | Ravenswood matrix (Brand/Generic/Specialty) |
+| Retail price validation | ✅ Complete | Wholesaler catalog comparison |
+| NDC format handling | ✅ Complete | Supports 11-digit and 5-4-2 dash formats |
 | Dashboard with filters | ✅ Complete | Search, min delta, IRA filter |
 | Drug detail view | ✅ Complete | Sensitivity analysis, provenance |
 | Loading dose modeling | ✅ Complete | Year 1 vs Maintenance |
@@ -1032,6 +1051,22 @@ This application does not expose external HTTP APIs. The internal data flow is:
 5. **Streamlit Configuration**
    - `.streamlit/config.toml` disables auto-page navigation
    - Session state persists data across page switches
+
+6. **NDC Handling**
+   - All NDC columns read as strings to preserve leading zeros
+   - Search supports both 11-digit (`12345678901`) and 5-4-2 (`12345-6789-01`) formats
+   - Normalization via `normalize_ndc()` strips dashes and pads to 11 digits
+
+7. **IRA Drug List (Data-Driven)**
+   - IRA drugs loaded from `data/sample/ira_drug_list.csv` at runtime
+   - Supports dynamic updates without code changes
+   - Fallback to hardcoded values if CSV not found
+   - Can be reloaded via `reload_ira_drugs()` function
+
+8. **Payer-Specific AWP Multipliers**
+   - Ravenswood matrix provides multipliers by drug category and payer
+   - Categories: Generic (15% AWP), Brand (84% AWP), Specialty (86% AWP)
+   - Falls back to 85% AWP if matrix not loaded
 
 ### Test Coverage
 

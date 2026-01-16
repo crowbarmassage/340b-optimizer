@@ -12,16 +12,23 @@ IRA Drug Selection Timeline:
 - 2026: First 10 drugs (announced August 2023)
 - 2027: 15 additional drugs
 - 2028+: Up to 20 drugs per year
+
+Data Source:
+- Primary: data/sample/ira_drug_list.csv (loaded at runtime)
+- Fallback: hardcoded values below (used if CSV not found)
 """
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
+
+import polars as pl
 
 logger = logging.getLogger(__name__)
 
-# IRA 2026 Negotiated Drugs (Medicare Drug Price Negotiation Program)
-# These 10 drugs were selected in August 2023 for 2026 pricing
-IRA_2026_DRUGS = {
+# Hardcoded fallback values - used only if CSV file is not available
+# These are kept for backwards compatibility and as a safety net
+_FALLBACK_IRA_2026_DRUGS = {
     "ELIQUIS": "Blood thinner (apixaban)",
     "JARDIANCE": "Diabetes (empagliflozin)",
     "XARELTO": "Blood thinner (rivaroxaban)",
@@ -39,8 +46,7 @@ IRA_2026_DRUGS = {
     "NOVOLOG MIX": "Insulin (insulin aspart)",
 }
 
-# IRA 2027 Negotiated Drugs (announced August 2024)
-IRA_2027_DRUGS = {
+_FALLBACK_IRA_2027_DRUGS = {
     "OZEMPIC": "Diabetes/Weight loss (semaglutide)",
     "RYBELSUS": "Diabetes (oral semaglutide)",
     "WEGOVY": "Weight loss (semaglutide)",
@@ -58,12 +64,149 @@ IRA_2027_DRUGS = {
     "SIVEXTRO": "Antibiotic (tedizolid)",
 }
 
+
+def _get_default_ira_csv_path() -> Path:
+    """Get the default path to the IRA drug list CSV file."""
+    # Try multiple potential locations
+    base_path = Path(__file__).parent.parent.parent.parent
+    potential_paths = [
+        base_path / "data" / "sample" / "ira_drug_list.csv",
+        Path.cwd() / "data" / "sample" / "ira_drug_list.csv",
+    ]
+    for path in potential_paths:
+        if path.exists():
+            return path
+    return potential_paths[0]  # Return first path even if doesn't exist
+
+
+def load_ira_drugs_from_csv(
+    csv_path: Path | None = None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Load IRA drugs from CSV file.
+
+    Args:
+        csv_path: Path to the IRA drug list CSV file.
+            If None, uses default location.
+
+    Returns:
+        Tuple of (ira_2026_drugs, ira_2027_drugs) dictionaries
+        mapping drug names to descriptions.
+    """
+    if csv_path is None:
+        csv_path = _get_default_ira_csv_path()
+
+    if not csv_path.exists():
+        logger.warning(
+            f"IRA CSV file not found at {csv_path}, using fallback hardcoded values"
+        )
+        return _FALLBACK_IRA_2026_DRUGS.copy(), _FALLBACK_IRA_2027_DRUGS.copy()
+
+    try:
+        df = pl.read_csv(csv_path)
+        logger.info(f"Loaded IRA drug list from {csv_path}: {df.height} drugs")
+
+        ira_2026: dict[str, str] = {}
+        ira_2027: dict[str, str] = {}
+
+        for row in df.iter_rows(named=True):
+            drug_name = str(row.get("drug_name", "")).upper().strip()
+            year = int(row.get("ira_year", 0))
+            description = str(row.get("description", ""))
+
+            if not drug_name:
+                continue
+
+            if year == 2026:
+                ira_2026[drug_name] = description
+            elif year == 2027:
+                ira_2027[drug_name] = description
+            else:
+                logger.warning(f"Unknown IRA year {year} for drug {drug_name}")
+
+        logger.info(
+            f"Loaded {len(ira_2026)} IRA 2026 drugs and {len(ira_2027)} IRA 2027 drugs"
+        )
+        return ira_2026, ira_2027
+
+    except Exception as e:
+        logger.error(f"Error loading IRA CSV from {csv_path}: {e}")
+        logger.warning("Using fallback hardcoded IRA values")
+        return _FALLBACK_IRA_2026_DRUGS.copy(), _FALLBACK_IRA_2027_DRUGS.copy()
+
+
+def load_ira_drugs_from_dataframe(
+    df: pl.DataFrame,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Load IRA drugs from a Polars DataFrame (e.g., from uploaded file).
+
+    Args:
+        df: DataFrame with columns: drug_name, ira_year, description
+
+    Returns:
+        Tuple of (ira_2026_drugs, ira_2027_drugs) dictionaries.
+    """
+    ira_2026: dict[str, str] = {}
+    ira_2027: dict[str, str] = {}
+
+    for row in df.iter_rows(named=True):
+        drug_name = str(row.get("drug_name", "")).upper().strip()
+        year = int(row.get("ira_year", 0))
+        description = str(row.get("description", ""))
+
+        if not drug_name:
+            continue
+
+        if year == 2026:
+            ira_2026[drug_name] = description
+        elif year == 2027:
+            ira_2027[drug_name] = description
+
+    logger.info(
+        f"Loaded {len(ira_2026)} IRA 2026 drugs and "
+        f"{len(ira_2027)} IRA 2027 drugs from DataFrame"
+    )
+    return ira_2026, ira_2027
+
+
+# Load IRA drugs at module initialization
+# These will be used by check_ira_status() and other functions
+IRA_2026_DRUGS, IRA_2027_DRUGS = load_ira_drugs_from_csv()
+
 # Combined lookup for all IRA drugs
 IRA_DRUGS_BY_YEAR: dict[str, int] = {}
 for drug in IRA_2026_DRUGS:
     IRA_DRUGS_BY_YEAR[drug.upper()] = 2026
 for drug in IRA_2027_DRUGS:
     IRA_DRUGS_BY_YEAR[drug.upper()] = 2027
+
+
+def reload_ira_drugs(
+    csv_path: Path | None = None, df: pl.DataFrame | None = None
+) -> None:
+    """Reload IRA drugs from CSV or DataFrame, updating module-level variables.
+
+    This function allows updating the IRA drug lists at runtime, for example
+    when a user uploads a new IRA drug list file.
+
+    Args:
+        csv_path: Path to CSV file. If provided, loads from file.
+        df: DataFrame to load from. If provided, takes precedence over csv_path.
+    """
+    global IRA_2026_DRUGS, IRA_2027_DRUGS, IRA_DRUGS_BY_YEAR
+
+    if df is not None:
+        IRA_2026_DRUGS, IRA_2027_DRUGS = load_ira_drugs_from_dataframe(df)
+    else:
+        IRA_2026_DRUGS, IRA_2027_DRUGS = load_ira_drugs_from_csv(csv_path)
+
+    # Rebuild the combined lookup
+    IRA_DRUGS_BY_YEAR = {}
+    for drug in IRA_2026_DRUGS:
+        IRA_DRUGS_BY_YEAR[drug.upper()] = 2026
+    for drug in IRA_2027_DRUGS:
+        IRA_DRUGS_BY_YEAR[drug.upper()] = 2027
+
+    logger.info(f"Reloaded IRA drugs: {len(IRA_DRUGS_BY_YEAR)} total drugs")
 
 
 @dataclass

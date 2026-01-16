@@ -38,6 +38,8 @@ data/uploads/
 !data/sample/asp_crosswalk.csv
 !data/sample/noc_pricing.csv
 !data/sample/noc_crosswalk.csv
+!data/sample/ira_drug_list.csv
+!data/sample/cms_crosswalk_reference.csv
 # Exclude large NADAC file (14MB)
 data/sample/ndc_nadac_master_statistics.csv
 

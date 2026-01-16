@@ -11,7 +11,15 @@ import polars as pl
 logger = logging.getLogger(__name__)
 
 # Columns that should always be read as strings to preserve leading zeros
-NDC_COLUMN_NAMES = {"NDC", "NDC2", "ndc", "ndc2", "Ndc"}
+NDC_COLUMN_NAMES = {
+    "NDC",
+    "NDC2",
+    "ndc",
+    "ndc2",
+    "Ndc",
+    "NDC or ALTERNATE ID",  # NOC crosswalk
+    "Product Catalog NDC",  # Wholesaler catalog
+}
 
 
 def load_excel_to_polars(

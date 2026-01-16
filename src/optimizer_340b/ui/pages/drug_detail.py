@@ -11,6 +11,7 @@ from optimizer_340b.compute.margins import (
     analyze_drug_margin,
     calculate_margin_sensitivity,
 )
+from optimizer_340b.ingest.normalizers import normalize_ndc
 from optimizer_340b.models import Drug, MarginAnalysis
 from optimizer_340b.risk import check_ira_status
 from optimizer_340b.ui.components.capture_slider import (
@@ -91,7 +92,9 @@ def _get_or_search_drug() -> Drug | None:
             # Show current drug with option to search new
             col1, col2 = st.columns([3, 1])
             with col1:
-                st.info(f"Currently viewing: **{drug.drug_name}** ({drug.ndc_formatted})")
+                st.info(
+                    f"Currently viewing: **{drug.drug_name}** ({drug.ndc_formatted})"
+                )
             with col2:
                 if st.button("🔍 Search New Drug", type="secondary"):
                     st.session_state.selected_drug = None
@@ -149,26 +152,32 @@ def _get_or_search_drug() -> Drug | None:
 
 
 def _lookup_drug_by_ndc(ndc: str) -> Drug | None:
-    """Look up drug by NDC from uploaded data."""
+    """Look up drug by NDC from uploaded data.
+
+    Supports NDC input in both 11-digit and 5-4-2 dash format.
+    """
     uploaded = st.session_state.get("uploaded_data", {})
     catalog = uploaded.get("catalog")
 
     if catalog is None:
         return _create_demo_drug("HUMIRA")  # Fallback to demo
 
-    # Find matching row
-    ndc_clean = ndc.replace("-", "").strip()
+    # Normalize input NDC for matching
+    ndc_normalized = normalize_ndc(ndc)
 
     for row in catalog.iter_rows(named=True):
-        row_ndc = str(row.get("NDC", "")).replace("-", "").strip()
-        if row_ndc == ndc_clean:
+        row_ndc = normalize_ndc(str(row.get("NDC", "")))
+        if row_ndc == ndc_normalized:
             return _row_to_drug(row)
 
     return None
 
 
 def _search_drug(query: str) -> Drug | None:
-    """Search for drug by name or NDC."""
+    """Search for drug by name or NDC.
+
+    Supports NDC input in both 11-digit and 5-4-2 dash format.
+    """
     uploaded = st.session_state.get("uploaded_data", {})
     catalog = uploaded.get("catalog")
 
@@ -181,12 +190,15 @@ def _search_drug(query: str) -> Drug | None:
         return None
 
     query_upper = query.upper()
+    query_ndc = normalize_ndc(query)  # Normalize for NDC matching (handles dashes)
 
     for row in catalog.iter_rows(named=True):
         drug_name = str(row.get("Drug Name") or row.get("Trade Name") or "").upper()
         ndc = str(row.get("NDC", ""))
+        ndc_normalized = normalize_ndc(ndc)
 
-        if query_upper in drug_name or query in ndc:
+        # Match by drug name or normalized NDC
+        if query_upper in drug_name or query_ndc == ndc_normalized:
             return _row_to_drug(row)
 
     return None
@@ -194,17 +206,16 @@ def _search_drug(query: str) -> Drug | None:
 
 def _row_to_drug(row: dict[str, object]) -> Drug:
     """Convert catalog row to Drug object."""
-    from optimizer_340b.ui.pages.dashboard import (
-        _build_hcpcs_lookup,
-        _build_nadac_lookup,
-    )
+    from optimizer_340b.risk.penny_pricing import build_nadac_lookup
+    from optimizer_340b.ui.pages.dashboard import _build_hcpcs_lookup
 
     uploaded = st.session_state.get("uploaded_data", {})
     hcpcs_lookup = _build_hcpcs_lookup(
         uploaded.get("crosswalk"),
         uploaded.get("asp_pricing"),
     )
-    nadac_lookup = _build_nadac_lookup(uploaded.get("nadac"))
+    nadac_df = uploaded.get("nadac")
+    nadac_lookup = build_nadac_lookup(nadac_df) if nadac_df is not None else {}
 
     ndc = str(row.get("NDC", ""))
     ndc_normalized = ndc.replace("-", "").strip()

@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import polars as pl
 import streamlit as st
 
@@ -27,6 +28,7 @@ from optimizer_340b.ingest.validators import (
     validate_noc_crosswalk_schema,
     validate_noc_pricing_schema,
 )
+from optimizer_340b.risk.ira_flags import reload_ira_drugs
 
 # Sample data directory
 SAMPLE_DATA_DIR = Path(__file__).parent.parent.parent.parent.parent / "data" / "sample"
@@ -139,6 +141,45 @@ def _load_sample_data() -> None:
             st.session_state.uploaded_data["noc_crosswalk"] = df
             logger.info(f"Loaded sample NOC crosswalk: {df.height} rows")
 
+    # Load Ravenswood AWP Reimbursement Matrix (optional - payer-specific multipliers)
+    ravenswood_path = SAMPLE_DATA_DIR / "Ravenswood_AWP_Reimbursement_Matrix.xlsx"
+    if ravenswood_path.exists():
+        try:
+            # Load Drug Categories sheet for drug classification
+            df = load_excel_to_polars(
+                str(ravenswood_path), sheet_name="Drug Categories"
+            )
+            st.session_state.uploaded_data["ravenswood_categories"] = df
+            logger.info(f"Loaded Ravenswood drug categories: {df.height} rows")
+        except Exception as e:
+            logger.warning(f"Could not load Ravenswood drug categories: {e}")
+
+        try:
+            # Load Summary sheet for payer mix (may have mixed types)
+            pdf = pd.read_excel(str(ravenswood_path), sheet_name="Summary")
+            # Convert all columns to string to avoid type issues
+            df_summary = pl.from_pandas(pdf.astype(str))
+            st.session_state.uploaded_data["ravenswood_summary"] = df_summary
+            logger.info(f"Loaded Ravenswood payer summary: {df_summary.height} rows")
+        except Exception as e:
+            logger.warning(f"Could not load Ravenswood summary: {e}")
+
+    # Load Wholesaler Catalog (optional - retail validation)
+    wholesaler_path = SAMPLE_DATA_DIR / "wholesaler_catalog.xlsx"
+    if wholesaler_path.exists():
+        df = load_excel_to_polars(str(wholesaler_path))
+        st.session_state.uploaded_data["wholesaler_catalog"] = df
+        logger.info(f"Loaded wholesaler catalog: {df.height} rows")
+
+    # Load IRA Drug List (optional - data-driven IRA flags)
+    ira_path = SAMPLE_DATA_DIR / "ira_drug_list.csv"
+    if ira_path.exists():
+        df = load_csv_to_polars(str(ira_path))
+        st.session_state.uploaded_data["ira_drugs"] = df
+        # Reload the IRA flags module with the new data
+        reload_ira_drugs(df=df)
+        logger.info(f"Loaded IRA drug list: {df.height} drugs")
+
 
 def render_upload_page() -> None:
     """Render the file upload page.
@@ -191,6 +232,9 @@ def render_upload_page() -> None:
     _render_noc_crosswalk_upload()
     _render_nadac_upload()
     _render_biologics_upload()
+    _render_ravenswood_upload()
+    _render_wholesaler_upload()
+    _render_ira_upload()
 
     # Validation summary
     st.markdown("---")
@@ -472,6 +516,137 @@ def _render_biologics_upload() -> None:
                 logger.exception("Error loading biologics grid")
 
 
+def _render_ravenswood_upload() -> None:
+    """Render Ravenswood AWP Reimbursement Matrix upload section."""
+    st.markdown("### AWP Reimbursement Matrix (Optional)")
+    st.caption(
+        "Excel file with payer-specific AWP multipliers for retail revenue "
+        "calculation. Contains drug category classifications "
+        "(Generic/Brand/Specialty) and payer mix. "
+        "If not provided, a default 85% AWP multiplier will be used."
+    )
+
+    uploaded_file = st.file_uploader(
+        "Upload AWP Reimbursement Matrix",
+        type=["xlsx", "xls"],
+        key="ravenswood_upload",
+        help="Payer-specific AWP reimbursement multipliers",
+    )
+
+    if uploaded_file is not None:
+        with st.spinner("Loading AWP matrix..."):
+            try:
+                # Load Drug Categories sheet
+                df_categories = load_excel_to_polars(
+                    uploaded_file, sheet_name="Drug Categories"
+                )
+                st.session_state.uploaded_data["ravenswood_categories"] = df_categories
+
+                # Reload file for Summary sheet (may have mixed types)
+                uploaded_file.seek(0)
+                pdf_summary = pd.read_excel(uploaded_file, sheet_name="Summary")
+                df_summary = pl.from_pandas(pdf_summary.astype(str))
+                st.session_state.uploaded_data["ravenswood_summary"] = df_summary
+
+                st.success(
+                    f"Loaded AWP matrix: {df_categories.height} drug categories, "
+                    f"{df_summary.height} payer entries"
+                )
+
+                with st.expander("Preview Drug Categories"):
+                    st.dataframe(df_categories.head(10).to_pandas(), width="stretch")
+
+                with st.expander("Preview Payer Summary"):
+                    st.dataframe(df_summary.head(10).to_pandas(), width="stretch")
+
+            except Exception as e:
+                st.error(f"Error loading file: {e}")
+                logger.exception("Error loading Ravenswood matrix")
+
+
+def _render_wholesaler_upload() -> None:
+    """Render Wholesaler Catalog upload section."""
+    st.markdown("### Wholesaler Catalog (Optional)")
+    st.caption(
+        "Excel file with real-world retail pricing for validation. "
+        "Used to flag records where calculated retail differs from actual by >20%. "
+        "Expected column: Product Catalog Unit Price (Current Retail) Average"
+    )
+
+    uploaded_file = st.file_uploader(
+        "Upload Wholesaler Catalog",
+        type=["xlsx", "xls"],
+        key="wholesaler_upload",
+        help="Wholesaler pricing data for retail validation",
+    )
+
+    if uploaded_file is not None:
+        with st.spinner("Loading wholesaler catalog..."):
+            try:
+                df = load_excel_to_polars(uploaded_file)
+                st.session_state.uploaded_data["wholesaler_catalog"] = df
+                st.success(f"Loaded {df.height:,} wholesaler catalog entries")
+
+                with st.expander("Preview Data"):
+                    st.dataframe(df.head(10).to_pandas(), width="stretch")
+
+            except Exception as e:
+                st.error(f"Error loading file: {e}")
+                logger.exception("Error loading wholesaler catalog")
+
+
+def _render_ira_upload() -> None:
+    """Render IRA Drug List upload section."""
+    st.markdown("### IRA Drug List (Optional)")
+    st.caption(
+        "CSV file with IRA (Inflation Reduction Act) negotiated drugs. "
+        "Updates the IRA risk flagging with the latest drug list. "
+        "Expected columns: drug_name, ira_year, description"
+    )
+
+    uploaded_file = st.file_uploader(
+        "Upload IRA Drug List",
+        type=["csv"],
+        key="ira_upload",
+        help="List of drugs subject to Medicare price negotiation under IRA",
+    )
+
+    if uploaded_file is not None:
+        with st.spinner("Loading IRA drug list..."):
+            try:
+                df = load_csv_to_polars(uploaded_file)
+
+                # Validate expected columns
+                expected_cols = {"drug_name", "ira_year", "description"}
+                actual_cols = set(df.columns)
+                if not expected_cols.issubset(actual_cols):
+                    missing = expected_cols - actual_cols
+                    st.error(f"Missing required columns: {', '.join(missing)}")
+                    return
+
+                st.session_state.uploaded_data["ira_drugs"] = df
+                # Reload the IRA flags module with the new data
+                reload_ira_drugs(df=df)
+                st.success(f"Loaded {df.height:,} IRA drugs and updated risk flags")
+
+                # Show breakdown by year
+                year_counts = df.group_by("ira_year").len().sort("ira_year")
+                st.caption(
+                    "Drugs by year: "
+                    + ", ".join(
+                        f"{row['ira_year']}: {row['len']}"
+                        for row in year_counts.iter_rows(named=True)
+                    )
+                )
+
+                with st.expander("Preview Data"):
+                    st.dataframe(df.head(10).to_pandas(), width="stretch")
+
+            except Exception as e:
+                st.error(f"Error loading file: {e}")
+                logger.exception("Error loading IRA drug list")
+
+
 def _show_validation_result(result: ValidationResult) -> None:
     """Display validation result details."""
     if result.warnings:
@@ -503,6 +678,9 @@ def _render_validation_summary() -> None:
         "noc_crosswalk": "NOC Crosswalk (fallback)",
         "nadac": "NADAC Statistics",
         "biologics": "Biologics Logic Grid",
+        "ravenswood_categories": "AWP Reimbursement Matrix",
+        "wholesaler_catalog": "Wholesaler Catalog (validation)",
+        "ira_drugs": "IRA Drug List",
     }
 
     col1, col2 = st.columns(2)

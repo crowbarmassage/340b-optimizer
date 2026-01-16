@@ -173,6 +173,9 @@ def _render_data_status() -> None:
         ("noc_crosswalk", "NOC Crosswalk (optional)"),
         ("nadac", "NADAC (optional)"),
         ("biologics", "Biologics (optional)"),
+        ("ravenswood_categories", "AWP Matrix (optional)"),
+        ("wholesaler_catalog", "Wholesaler (optional)"),
+        ("ira_drugs", "IRA Drugs (optional)"),
     ]
 
     for key, name in files:
