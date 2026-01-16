@@ -63,19 +63,15 @@ class Drug:
 
     @property
     def ndc_normalized(self) -> str:
-        """Return 10-digit normalized NDC.
+        """Return 11-digit normalized NDC with leading zeros preserved.
 
-        Removes dashes and pads to 10 digits. Handles 11-digit NDCs
-        by dropping the check digit.
+        Removes dashes and pads to 11 digits.
 
         Returns:
-            10-digit NDC string without dashes.
+            11-digit NDC string without dashes, with leading zeros.
         """
         cleaned = self.ndc.replace("-", "").replace(" ", "")
-        # Handle 11-digit NDCs (drop check digit)
-        if len(cleaned) == 11:
-            cleaned = cleaned[:10]
-        return cleaned.zfill(10)[-10:]
+        return cleaned.zfill(11)[-11:]
 
 
 @dataclass

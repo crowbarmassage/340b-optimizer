@@ -38,12 +38,13 @@ class TestDrug:
         assert drug.has_medical_path() is False
 
     def test_ndc_normalized_removes_dashes(self, sample_drug: Drug) -> None:
-        """NDC normalization should remove dashes."""
+        """NDC normalization should remove dashes and preserve 11 digits."""
         # sample_drug has ndc="0074-4339-02"
-        assert sample_drug.ndc_normalized == "0074433902"
+        assert sample_drug.ndc_normalized == "00074433902"
+        assert len(sample_drug.ndc_normalized) == 11
 
     def test_ndc_normalized_pads_short_ndc(self) -> None:
-        """Short NDCs should be zero-padded to 10 digits."""
+        """Short NDCs should be zero-padded to 11 digits."""
         drug = Drug(
             ndc="12345",
             drug_name="TEST",
@@ -51,11 +52,11 @@ class TestDrug:
             contract_cost=Decimal("10.00"),
             awp=Decimal("100.00"),
         )
-        assert drug.ndc_normalized == "0000012345"
-        assert len(drug.ndc_normalized) == 10
+        assert drug.ndc_normalized == "00000012345"
+        assert len(drug.ndc_normalized) == 11
 
     def test_ndc_normalized_handles_11_digit(self) -> None:
-        """11-digit NDCs should drop the check digit."""
+        """11-digit NDCs should be preserved as-is."""
         drug = Drug(
             ndc="12345678901",  # 11 digits
             drug_name="TEST",
@@ -63,11 +64,11 @@ class TestDrug:
             contract_cost=Decimal("10.00"),
             awp=Decimal("100.00"),
         )
-        assert drug.ndc_normalized == "1234567890"
-        assert len(drug.ndc_normalized) == 10
+        assert drug.ndc_normalized == "12345678901"
+        assert len(drug.ndc_normalized) == 11
 
     def test_ndc_normalized_handles_spaces(self) -> None:
-        """NDC normalization should remove spaces."""
+        """NDC normalization should remove spaces and pad to 11 digits."""
         drug = Drug(
             ndc="0074 4339 02",
             drug_name="TEST",
@@ -75,7 +76,8 @@ class TestDrug:
             contract_cost=Decimal("10.00"),
             awp=Decimal("100.00"),
         )
-        assert drug.ndc_normalized == "0074433902"
+        assert drug.ndc_normalized == "00074433902"
+        assert len(drug.ndc_normalized) == 11
 
     def test_drug_default_values(self) -> None:
         """Drug should have sensible defaults for optional fields."""

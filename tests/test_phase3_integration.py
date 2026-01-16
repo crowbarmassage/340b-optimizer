@@ -47,16 +47,17 @@ class TestPhase1Foundation:
     """Tests for Phase 1: Core models and configuration."""
 
     def test_ndc_normalization_formats(self) -> None:
-        """NDC normalization should handle all common formats."""
+        """NDC normalization should handle all common formats to 11-digit."""
         test_cases = [
-            ("0074-4339-02", "0074433902"),  # Dashes
-            ("00074433902", "0007443390"),  # 11-digit
-            ("74433902", "0074433902"),  # Short
-            ("1234567890", "1234567890"),  # 10-digit
+            ("0074-4339-02", "00074433902"),  # Dashes -> 11 digits
+            ("00074433902", "00074433902"),  # 11-digit preserved
+            ("74433902", "00074433902"),  # Short -> padded to 11
+            ("1234567890", "01234567890"),  # 10-digit -> padded to 11
         ]
         for input_ndc, expected in test_cases:
             result = normalize_ndc(input_ndc)
             assert result == expected, f"Failed for {input_ndc}"
+            assert len(result) == 11, f"Not 11 digits for {input_ndc}"
 
     def test_drug_model_import(self) -> None:
         """Core models should be importable."""

@@ -19,25 +19,26 @@ from optimizer_340b.ingest.normalizers import (
 
 
 class TestNDCNormalization:
-    """Tests for NDC normalization."""
+    """Tests for NDC normalization to 11-digit format."""
 
     @pytest.mark.parametrize(
         "input_ndc,expected",
         [
-            ("0074-4339-02", "0074433902"),  # Standard with dashes
-            ("12345678901", "1234567890"),  # 11-digit drops check digit
-            ("1234567890", "1234567890"),  # 10-digit unchanged
-            ("12345", "0000012345"),  # Short NDC zero-padded
-            ("0012345", "0000012345"),  # Leading zeros preserved
-            ("00074-4339-02", "0007443390"),  # 11 digits - drops check digit
-            ("", "0000000000"),  # Empty string
-            ("abc123def", "0000000123"),  # Non-numeric chars removed
+            ("0074-4339-02", "00074433902"),  # Standard with dashes -> 11 digits
+            ("12345678901", "12345678901"),  # 11-digit preserved as-is
+            ("1234567890", "01234567890"),  # 10-digit padded to 11
+            ("12345", "00000012345"),  # Short NDC zero-padded to 11
+            ("0012345", "00000012345"),  # Leading zeros preserved, padded to 11
+            ("00074-4339-02", "00074433902"),  # 11 digits with dashes preserved
+            ("", "00000000000"),  # Empty string -> 11 zeros
+            ("abc123def", "00000000123"),  # Non-numeric chars removed, padded to 11
         ],
     )
     def test_normalize_ndc(self, input_ndc: str, expected: str) -> None:
-        """NDC normalization should handle various formats."""
+        """NDC normalization should produce 11-digit format."""
         result = normalize_ndc(input_ndc)
         assert result == expected
+        assert len(result) == 11
 
     def test_normalize_ndc_none(self) -> None:
         """None input should return empty normalized string."""
@@ -45,13 +46,16 @@ class TestNDCNormalization:
         assert result == ""
 
     def test_normalize_ndc_column(self) -> None:
-        """Column normalization should apply to all rows."""
+        """Column normalization should apply to all rows with 11-digit format."""
         df = pl.DataFrame({"NDC": ["0074-4339-02", "12345", "1234567890"]})
 
         result = normalize_ndc_column(df)
 
-        expected = ["0074433902", "0000012345", "1234567890"]
+        expected = ["00074433902", "00000012345", "01234567890"]
         assert result["ndc_normalized"].to_list() == expected
+        # Verify all are 11 digits
+        for ndc in result["ndc_normalized"].to_list():
+            assert len(ndc) == 11
 
     def test_normalize_ndc_column_missing_column(self) -> None:
         """Missing NDC column should return unchanged DataFrame."""
@@ -173,7 +177,8 @@ class TestCrosswalkNormalization:
         result = normalize_crosswalk(df)
 
         assert "ndc_normalized" in result.columns
-        assert result["ndc_normalized"][0] == "0074433902"
+        assert result["ndc_normalized"][0] == "00074433902"
+        assert len(result["ndc_normalized"][0]) == 11
 
 
 class TestASPPricingNormalization:

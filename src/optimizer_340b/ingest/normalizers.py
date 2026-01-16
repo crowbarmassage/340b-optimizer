@@ -1,7 +1,7 @@
 """Data normalization and cleaning for 340B data sources (Silver Layer).
 
 This module handles:
-- NDC normalization to 10-digit format
+- NDC normalization to 11-digit format (preserving leading zeros)
 - Column mapping/renaming for different data sources
 - CMS file preprocessing (skip header rows)
 - Fuzzy drug name matching
@@ -15,6 +15,9 @@ import polars as pl
 from thefuzz import fuzz  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
+
+# Columns that should always be read as strings to preserve leading zeros
+NDC_COLUMN_NAMES = {"NDC", "NDC2", "ndc", "ndc2", "Ndc"}
 
 
 # Column mapping configurations for different data sources
@@ -46,18 +49,19 @@ ASP_PRICING_COLUMN_MAP = {
 
 
 def normalize_ndc(ndc: str) -> str:
-    """Normalize NDC to 10-digit format.
+    """Normalize NDC to 11-digit format, preserving leading zeros.
 
     Handles various NDC formats:
-    - 11-digit with dashes: 12345-6789-01 -> 1234567890
-    - 10-digit without dashes: 1234567890 -> 1234567890
-    - Short NDCs: 12345 -> 0000012345
+    - 11-digit with dashes: 12345-6789-01 -> 12345678901
+    - 11-digit without dashes: 12345678901 -> 12345678901
+    - 10-digit: 1234567890 -> 01234567890 (padded)
+    - Short NDCs: 12345 -> 00000012345 (padded)
 
     Args:
         ndc: Raw NDC string.
 
     Returns:
-        10-digit normalized NDC string.
+        11-digit normalized NDC string with leading zeros preserved.
     """
     if ndc is None:
         return ""
@@ -65,12 +69,8 @@ def normalize_ndc(ndc: str) -> str:
     # Remove all non-numeric characters
     cleaned = re.sub(r"[^0-9]", "", str(ndc))
 
-    # Handle 11-digit NDCs (drop check digit)
-    if len(cleaned) == 11:
-        cleaned = cleaned[:10]
-
-    # Pad short NDCs with leading zeros
-    return cleaned.zfill(10)[-10:]
+    # Pad short NDCs with leading zeros to 11 digits
+    return cleaned.zfill(11)[-11:]
 
 
 def normalize_ndc_column(
@@ -94,7 +94,7 @@ def normalize_ndc_column(
 
     return df.with_columns(
         pl.col(ndc_column)
-        .map_elements(normalize_ndc, return_dtype=pl.Utf8)
+        .map_elements(normalize_ndc, return_dtype=pl.String)
         .alias(output_column)
     )
 
@@ -212,7 +212,8 @@ def preprocess_cms_csv(
     """Preprocess CMS CSV files that have header metadata rows.
 
     CMS files (ASP pricing, crosswalk) typically have 8 rows of metadata
-    before the actual column headers.
+    before the actual column headers. NDC columns are read as strings to
+    preserve leading zeros.
 
     Args:
         file_path: Path to the CSV file.
@@ -224,12 +225,30 @@ def preprocess_cms_csv(
     """
     logger.info(f"Preprocessing CMS CSV, skipping {skip_rows} header rows")
 
+    # First pass: read a small sample to detect column names
+    df_sample = pl.read_csv(
+        file_path,
+        encoding=encoding,
+        skip_rows=skip_rows,
+        n_rows=5,
+        truncate_ragged_lines=True,
+        infer_schema_length=0,  # Read all as strings for header detection
+    )
+
+    # Build schema overrides for NDC columns (to preserve leading zeros)
+    schema_overrides = {
+        col: pl.String for col in df_sample.columns if col in NDC_COLUMN_NAMES
+    }
+    for col in schema_overrides:
+        logger.info(f"Reading '{col}' as string to preserve leading zeros")
+
     df = pl.read_csv(
         file_path,
         encoding=encoding,
         skip_rows=skip_rows,
         infer_schema_length=10000,
         truncate_ragged_lines=True,
+        schema_overrides=schema_overrides if schema_overrides else None,
     )
 
     # Drop completely empty columns (CMS files have many empty trailing columns)

@@ -10,6 +10,9 @@ import polars as pl
 
 logger = logging.getLogger(__name__)
 
+# Columns that should always be read as strings to preserve leading zeros
+NDC_COLUMN_NAMES = {"NDC", "NDC2", "ndc", "ndc2", "Ndc"}
+
 
 def load_excel_to_polars(
     file: BinaryIO | Path | str,
@@ -19,6 +22,8 @@ def load_excel_to_polars(
 
     Uses pandas as intermediate step for Excel parsing (openpyxl backend),
     then converts to Polars for downstream processing efficiency.
+
+    NDC columns are automatically read as strings to preserve leading zeros.
 
     Args:
         file: File path, path string, or file-like object.
@@ -37,8 +42,30 @@ def load_excel_to_polars(
         if isinstance(file, str):
             file = Path(file)
 
+        # First pass: read headers to detect NDC columns
         # Use pandas for Excel parsing (openpyxl backend)
-        pdf = pd.read_excel(file, sheet_name=sheet_name, engine="openpyxl")
+        pdf_headers = pd.read_excel(
+            file, sheet_name=sheet_name, engine="openpyxl", nrows=0
+        )
+
+        # Build dtype dict for NDC columns to preserve leading zeros
+        dtype_overrides: dict[str, type] = {}
+        for col in pdf_headers.columns:
+            if col in NDC_COLUMN_NAMES:
+                dtype_overrides[col] = str
+                logger.info(f"Reading '{col}' as string to preserve leading zeros")
+
+        # Reset file position if it's a file-like object
+        if hasattr(file, "seek"):
+            file.seek(0)
+
+        # Read with dtype overrides
+        pdf = pd.read_excel(
+            file,
+            sheet_name=sheet_name,
+            engine="openpyxl",
+            dtype=dtype_overrides if dtype_overrides else None,
+        )
 
         # Convert to Polars
         df = pl.from_pandas(pdf)
@@ -58,6 +85,8 @@ def load_csv_to_polars(
 ) -> pl.DataFrame:
     """Load CSV file into Polars DataFrame.
 
+    NDC columns are automatically read as strings to preserve leading zeros.
+
     Args:
         file: File path, path string, or file-like object.
         encoding: Character encoding. CMS files use latin-1 (not UTF-8).
@@ -76,23 +105,61 @@ def load_csv_to_polars(
         if isinstance(file, str):
             file = Path(file)
 
+        # First pass: read headers to detect NDC columns
+        if isinstance(file, Path):
+            df_headers = pl.read_csv(
+                file,
+                encoding=encoding,
+                n_rows=0,
+                truncate_ragged_lines=True,
+            )
+        else:
+            # File-like object - read bytes
+            content = file.read()
+            if isinstance(content, str):
+                content = content.encode(encoding)
+            df_headers = pl.read_csv(
+                BytesIO(content),
+                encoding=encoding,
+                n_rows=0,
+                truncate_ragged_lines=True,
+            )
+
+        # Build schema overrides for NDC columns (to preserve leading zeros)
+        schema_overrides = {
+            col: pl.String for col in df_headers.columns if col in NDC_COLUMN_NAMES
+        }
+        for col in schema_overrides:
+            logger.info(f"Reading '{col}' as string to preserve leading zeros")
+
+        # Reset file position if it's a file-like object
+        if hasattr(file, "seek"):
+            file.seek(0)
+        elif not isinstance(file, Path):
+            # Recreate BytesIO from content
+            file = BytesIO(content)
+
         if isinstance(file, Path):
             df = pl.read_csv(
                 file,
                 encoding=encoding,
                 infer_schema_length=infer_schema_length,
                 truncate_ragged_lines=True,
+                schema_overrides=schema_overrides if schema_overrides else None,
             )
         else:
             # File-like object - read bytes and parse
-            content = file.read()
-            if isinstance(content, str):
-                content = content.encode(encoding)
+            if hasattr(file, "read"):
+                content = file.read()
+                if isinstance(content, str):
+                    content = content.encode(encoding)
+                file = BytesIO(content)
             df = pl.read_csv(
-                BytesIO(content),
+                file,
                 encoding=encoding,
                 infer_schema_length=infer_schema_length,
                 truncate_ragged_lines=True,
+                schema_overrides=schema_overrides if schema_overrides else None,
             )
 
         # Drop completely empty columns (common in CMS crosswalk files)
