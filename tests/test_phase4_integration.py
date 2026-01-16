@@ -468,7 +468,7 @@ class TestOptimizationVelocity:
 
         drugs = [
             Drug(
-                ndc=f"{i:010d}",
+                ndc=f"{i:011d}",
                 drug_name=f"TEST_DRUG_{i}",
                 manufacturer="TEST",
                 contract_cost=Decimal("100.00"),

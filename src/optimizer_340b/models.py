@@ -73,6 +73,18 @@ class Drug:
         cleaned = self.ndc.replace("-", "").replace(" ", "")
         return cleaned.zfill(11)[-11:]
 
+    @property
+    def ndc_formatted(self) -> str:
+        """Return NDC in standard 5-4-2 format with dashes.
+
+        Example: "00074433902" -> "00074-4339-02"
+
+        Returns:
+            NDC string in 5-4-2 format (e.g., "00074-4339-02").
+        """
+        normalized = self.ndc_normalized
+        return f"{normalized[:5]}-{normalized[5:9]}-{normalized[9:11]}"
+
 
 @dataclass
 class MarginAnalysis:

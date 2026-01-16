@@ -14,6 +14,8 @@ from optimizer_340b.ingest.loaders import load_csv_to_polars, load_excel_to_pola
 from optimizer_340b.ingest.normalizers import (
     normalize_catalog,
     normalize_crosswalk,
+    normalize_noc_crosswalk,
+    normalize_noc_pricing,
     preprocess_cms_csv,
 )
 from optimizer_340b.ingest.validators import (
@@ -22,6 +24,8 @@ from optimizer_340b.ingest.validators import (
     validate_catalog_schema,
     validate_crosswalk_schema,
     validate_nadac_schema,
+    validate_noc_crosswalk_schema,
+    validate_noc_pricing_schema,
 )
 
 # Sample data directory
@@ -115,6 +119,26 @@ def _load_sample_data() -> None:
         st.session_state.uploaded_data["biologics"] = df
         logger.info(f"Loaded sample biologics: {df.height} rows")
 
+    # Load NOC pricing (optional - fallback for drugs without J-codes)
+    noc_pricing_path = SAMPLE_DATA_DIR / "noc_pricing.csv"
+    if noc_pricing_path.exists():
+        df = preprocess_cms_csv(str(noc_pricing_path), skip_rows=12)
+        df = normalize_noc_pricing(df)
+        result = validate_noc_pricing_schema(df)
+        if result.is_valid:
+            st.session_state.uploaded_data["noc_pricing"] = df
+            logger.info(f"Loaded sample NOC pricing: {df.height} rows")
+
+    # Load NOC crosswalk (optional - fallback for drugs without J-codes)
+    noc_crosswalk_path = SAMPLE_DATA_DIR / "noc_crosswalk.csv"
+    if noc_crosswalk_path.exists():
+        df = preprocess_cms_csv(str(noc_crosswalk_path), skip_rows=9)
+        df = normalize_noc_crosswalk(df)
+        result = validate_noc_crosswalk_schema(df)
+        if result.is_valid:
+            st.session_state.uploaded_data["noc_crosswalk"] = df
+            logger.info(f"Loaded sample NOC crosswalk: {df.height} rows")
+
 
 def render_upload_page() -> None:
     """Render the file upload page.
@@ -153,7 +177,7 @@ def render_upload_page() -> None:
         with col2:
             st.caption(
                 "Includes: Product Catalog, ASP Pricing, Crosswalk, NADAC, "
-                "and Biologics Logic Grid"
+                "Biologics Logic Grid, and NOC fallback files"
             )
         st.markdown("---")
 
@@ -161,6 +185,8 @@ def render_upload_page() -> None:
     _render_catalog_upload()
     _render_asp_pricing_upload()
     _render_crosswalk_upload()
+    _render_noc_pricing_upload()
+    _render_noc_crosswalk_upload()
     _render_nadac_upload()
     _render_biologics_upload()
 
@@ -291,6 +317,90 @@ def _render_crosswalk_upload() -> None:
                 logger.exception("Error loading crosswalk")
 
 
+def _render_noc_pricing_upload() -> None:
+    """Render NOC pricing file upload section."""
+    st.markdown("### NOC Pricing File (Optional)")
+    st.caption(
+        "CMS NOC pricing file for drugs without permanent J-codes (CSV). "
+        "Provides fallback reimbursement rates for new drugs. "
+        "Expected columns: Drug Generic Name, Payment Limit"
+    )
+
+    uploaded_file = st.file_uploader(
+        "Upload NOC Pricing File",
+        type=["csv"],
+        key="noc_pricing_upload",
+        help="CMS NOC (Not Otherwise Classified) drug pricing file",
+    )
+
+    if uploaded_file is not None:
+        with st.spinner("Loading NOC pricing..."):
+            try:
+                # NOC pricing file has 12 header rows to skip
+                df = _load_cms_csv_with_skip(uploaded_file, skip_rows=12)
+                df = normalize_noc_pricing(df)
+
+                # Validate schema
+                result = validate_noc_pricing_schema(df)
+
+                if result.is_valid:
+                    st.session_state.uploaded_data["noc_pricing"] = df
+                    st.success(f"Loaded {df.height:,} NOC drug pricing records")
+                    _show_validation_result(result)
+
+                    with st.expander("Preview Data"):
+                        st.dataframe(df.head(10).to_pandas(), width="stretch")
+                else:
+                    st.error("Validation failed")
+                    _show_validation_result(result)
+
+            except Exception as e:
+                st.error(f"Error loading file: {e}")
+                logger.exception("Error loading NOC pricing")
+
+
+def _render_noc_crosswalk_upload() -> None:
+    """Render NOC crosswalk file upload section."""
+    st.markdown("### NOC NDC-HCPCS Crosswalk (Optional)")
+    st.caption(
+        "CMS NOC crosswalk for drugs without permanent J-codes (CSV). "
+        "Maps NDCs to generic drug names for fallback pricing lookup. "
+        "Expected columns: NDC, Drug Generic Name"
+    )
+
+    uploaded_file = st.file_uploader(
+        "Upload NOC Crosswalk",
+        type=["csv"],
+        key="noc_crosswalk_upload",
+        help="CMS NOC NDC to generic drug name mapping file",
+    )
+
+    if uploaded_file is not None:
+        with st.spinner("Loading NOC crosswalk..."):
+            try:
+                # NOC crosswalk file has 9 header rows to skip
+                df = _load_cms_csv_with_skip(uploaded_file, skip_rows=9)
+                df = normalize_noc_crosswalk(df)
+
+                # Validate schema
+                result = validate_noc_crosswalk_schema(df)
+
+                if result.is_valid:
+                    st.session_state.uploaded_data["noc_crosswalk"] = df
+                    st.success(f"Loaded {df.height:,} NOC NDC mappings")
+                    _show_validation_result(result)
+
+                    with st.expander("Preview Data"):
+                        st.dataframe(df.head(10).to_pandas(), width="stretch")
+                else:
+                    st.error("Validation failed")
+                    _show_validation_result(result)
+
+            except Exception as e:
+                st.error(f"Error loading file: {e}")
+                logger.exception("Error loading NOC crosswalk")
+
+
 def _render_nadac_upload() -> None:
     """Render NADAC statistics upload section."""
     st.markdown("### NADAC Statistics (Optional)")
@@ -387,6 +497,8 @@ def _render_validation_summary() -> None:
 
     # Optional files
     optional = {
+        "noc_pricing": "NOC Pricing (fallback)",
+        "noc_crosswalk": "NOC Crosswalk (fallback)",
         "nadac": "NADAC Statistics",
         "biologics": "Biologics Logic Grid",
     }

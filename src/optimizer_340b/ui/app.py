@@ -169,6 +169,8 @@ def _render_data_status() -> None:
         ("catalog", "Product Catalog"),
         ("asp_pricing", "ASP Pricing"),
         ("crosswalk", "Crosswalk"),
+        ("noc_pricing", "NOC Pricing (optional)"),
+        ("noc_crosswalk", "NOC Crosswalk (optional)"),
         ("nadac", "NADAC (optional)"),
         ("biologics", "Biologics (optional)"),
     ]

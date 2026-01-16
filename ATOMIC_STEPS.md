@@ -172,11 +172,11 @@ class TestDrug:
         assert sample_drug_retail_only.has_medical_path() is False
 
     def test_ndc_normalized_removes_dashes(self, sample_drug: Drug) -> None:
-        """NDC normalization should remove dashes and pad to 10 digits."""
-        assert sample_drug.ndc_normalized == "0074433902"
+        """NDC normalization should remove dashes and pad to 11 digits."""
+        assert sample_drug.ndc_normalized == "00074433902"
 
     def test_ndc_normalized_pads_short_ndc(self) -> None:
-        """Short NDCs should be zero-padded to 10 digits."""
+        """Short NDCs should be zero-padded to 11 digits."""
         drug = Drug(
             ndc="12345",
             drug_name="TEST",
@@ -184,7 +184,7 @@ class TestDrug:
             contract_cost=Decimal("10.00"),
             awp=Decimal("100.00"),
         )
-        assert drug.ndc_normalized == "0000012345"
+        assert drug.ndc_normalized == "00000012345"
 
 
 class TestDosingProfile:
@@ -523,7 +523,7 @@ class TestCatalogValidation:
     def test_row_volume_check_passes(self) -> None:
         """Catalog with sufficient rows should pass volume check."""
         # Create DataFrame with 35k rows
-        df = pl.DataFrame({"NDC": [f"{i:010d}" for i in range(35000)]})
+        df = pl.DataFrame({"NDC": [f"{i:011d}" for i in range(35000)]})
 
         result = validate_catalog_row_volume(df, min_rows=30000)
 
@@ -629,28 +629,25 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_ndc(ndc: str) -> str:
-    """Normalize NDC to 10-digit format.
+    """Normalize NDC to 11-digit format, preserving leading zeros.
 
     Handles various NDC formats:
-    - 11-digit with dashes: 12345-6789-01 -> 1234567890
-    - 10-digit without dashes: 1234567890 -> 1234567890
-    - Short NDCs: 12345 -> 0000012345
+    - 11-digit with dashes: 12345-6789-01 -> 12345678901
+    - 11-digit without dashes: 12345678901 -> 12345678901
+    - 10-digit: 1234567890 -> 01234567890 (padded)
+    - Short NDCs: 12345 -> 00000012345 (padded)
 
     Args:
         ndc: Raw NDC string.
 
     Returns:
-        10-digit normalized NDC string.
+        11-digit normalized NDC string with leading zeros preserved.
     """
     # Remove all non-numeric characters
     cleaned = re.sub(r"[^0-9]", "", str(ndc))
 
-    # Handle 11-digit NDCs (drop check digit)
-    if len(cleaned) == 11:
-        cleaned = cleaned[:10]
-
-    # Pad short NDCs with leading zeros
-    return cleaned.zfill(10)[-10:]
+    # Pad short NDCs with leading zeros to 11 digits
+    return cleaned.zfill(11)[-11:]
 
 
 def normalize_ndc_column(df: pl.DataFrame, ndc_column: str = "NDC") -> pl.DataFrame:
@@ -874,12 +871,12 @@ class TestCrosswalkJoin:
         """Crosswalk should have >95% match rate for infusible drugs."""
         # Create test data with 100 infusible drugs, 96 with crosswalk matches
         catalog = pl.DataFrame({
-            "NDC": [f"{i:010d}" for i in range(100)],
-            "ndc_normalized": [f"{i:010d}" for i in range(100)],
+            "NDC": [f"{i:011d}" for i in range(100)],
+            "ndc_normalized": [f"{i:011d}" for i in range(100)],
         })
         crosswalk = pl.DataFrame({
-            "NDC": [f"{i:010d}" for i in range(96)],
-            "ndc_normalized": [f"{i:010d}" for i in range(96)],
+            "NDC": [f"{i:011d}" for i in range(96)],
+            "ndc_normalized": [f"{i:011d}" for i in range(96)],
             "HCPCS Code": [f"J{i:04d}" for i in range(96)],
         })
 
@@ -1376,7 +1373,7 @@ class TestPennyPricing:
     def test_penny_pricing_flag(self) -> None:
         """Drugs with penny pricing should be flagged."""
         nadac_df = pl.DataFrame({
-            "ndc": ["1234567890", "9876543210"],
+            "ndc": ["12345678901", "98765432101"],
             "penny_pricing": [True, False],
             "total_discount_340b_pct": [99.9, 50.0],
         })
@@ -1384,7 +1381,7 @@ class TestPennyPricing:
         flagged = check_penny_pricing(nadac_df)
 
         assert len(flagged) == 1
-        assert flagged[0]["ndc"] == "1234567890"
+        assert flagged[0]["ndc"] == "12345678901"
 
     def test_penny_pricing_excluded_from_top_opportunities(self) -> None:
         """Gatekeeper: Penny Pricing Alert.
@@ -1392,9 +1389,9 @@ class TestPennyPricing:
         Drugs with Penny Pricing = Yes should NOT appear in "Top Opportunities".
         """
         drugs = [
-            {"ndc": "1111111111", "margin": 1000, "penny_pricing": False},
-            {"ndc": "2222222222", "margin": 5000, "penny_pricing": True},  # High margin but penny priced
-            {"ndc": "3333333333", "margin": 800, "penny_pricing": False},
+            {"ndc": "11111111111", "margin": 1000, "penny_pricing": False},
+            {"ndc": "22222222222", "margin": 5000, "penny_pricing": True},  # High margin but penny priced
+            {"ndc": "33333333333", "margin": 800, "penny_pricing": False},
         ]
 
         # Filter out penny priced drugs
@@ -1605,7 +1602,7 @@ class TestFullPipeline:
         # Create 100 test drugs to simulate lookup
         drugs = [
             Drug(
-                ndc=f"{i:010d}",
+                ndc=f"{i:011d}",
                 drug_name=f"TEST_DRUG_{i}",
                 manufacturer="TEST",
                 contract_cost=Decimal("100.00"),

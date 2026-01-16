@@ -21,6 +21,13 @@ CROSSWALK_OPTIONAL_COLUMNS = {"Labeler Name", "NDC Trade Name", "Pkg Size", "Pkg
 NADAC_REQUIRED_COLUMNS = {"ndc", "total_discount_340b_pct"}
 NADAC_OPTIONAL_COLUMNS = {"nadac_per_unit", "penny_pricing", "as_of_date"}
 
+# NOC (Not Otherwise Classified) files - fallback for drugs without permanent J-codes
+NOC_PRICING_REQUIRED_COLUMNS = {"Drug Generic Name", "Payment Limit"}
+NOC_PRICING_OPTIONAL_COLUMNS = {"Dosage", "Notes"}
+
+NOC_CROSSWALK_REQUIRED_COLUMNS = {"NDC", "Drug Generic Name"}
+NOC_CROSSWALK_OPTIONAL_COLUMNS = {"LABELER NAME", "Drug Name", "PKG SIZE", "BILLUNITSPKG"}
+
 # Top 50 high-value drugs that should have complete pricing data
 # These are commonly used in 340B optimization and must not be silently dropped
 TOP_50_DRUG_NAMES = [
@@ -483,6 +490,68 @@ def validate_nadac_schema(df: pl.DataFrame) -> ValidationResult:
     return ValidationResult(
         is_valid=True,
         message=f"NADAC schema valid with {df.height:,} NDCs",
+        missing_columns=[],
+        row_count=df.height,
+    )
+
+
+def validate_noc_pricing_schema(df: pl.DataFrame) -> ValidationResult:
+    """Validate NOC (Not Otherwise Classified) pricing file schema.
+
+    NOC pricing provides fallback reimbursement rates for new drugs
+    that don't yet have a permanent J-code.
+
+    Args:
+        df: DataFrame to validate.
+
+    Returns:
+        ValidationResult with status and details.
+    """
+    columns = set(df.columns)
+    missing = NOC_PRICING_REQUIRED_COLUMNS - columns
+
+    if missing:
+        return ValidationResult(
+            is_valid=False,
+            message=f"NOC Pricing file missing required columns: {sorted(missing)}",
+            missing_columns=sorted(missing),
+            row_count=df.height,
+        )
+
+    return ValidationResult(
+        is_valid=True,
+        message=f"NOC Pricing schema valid with {df.height:,} drug entries",
+        missing_columns=[],
+        row_count=df.height,
+    )
+
+
+def validate_noc_crosswalk_schema(df: pl.DataFrame) -> ValidationResult:
+    """Validate NOC NDC-HCPCS crosswalk schema.
+
+    NOC crosswalk maps NDCs to generic drug names for drugs
+    without permanent J-codes, enabling fallback pricing lookup.
+
+    Args:
+        df: DataFrame to validate.
+
+    Returns:
+        ValidationResult with status and details.
+    """
+    columns = set(df.columns)
+    missing = NOC_CROSSWALK_REQUIRED_COLUMNS - columns
+
+    if missing:
+        return ValidationResult(
+            is_valid=False,
+            message=f"NOC Crosswalk missing required columns: {sorted(missing)}",
+            missing_columns=sorted(missing),
+            row_count=df.height,
+        )
+
+    return ValidationResult(
+        is_valid=True,
+        message=f"NOC Crosswalk schema valid with {df.height:,} mappings",
         missing_columns=[],
         row_count=df.height,
     )

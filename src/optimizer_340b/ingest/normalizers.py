@@ -47,6 +47,27 @@ ASP_PRICING_COLUMN_MAP = {
     "HCPCS Code Dosage": "Dosage",
 }
 
+# NOC (Not Otherwise Classified) file column mappings
+NOC_PRICING_COLUMN_MAP = {
+    "Drug Generic Name (Trade Name)": "Drug Generic Name",
+    "Drug Generic Name": "Drug Generic Name",
+    "Payment Limit": "Payment Limit",
+    "Dosage": "Dosage",
+    "Notes": "Notes",
+}
+
+NOC_CROSSWALK_COLUMN_MAP = {
+    "NDC or ALTERNATE ID": "NDC",
+    "Drug Generic Name": "Drug Generic Name",
+    "LABELER NAME": "Labeler Name",
+    "Drug Name": "Drug Name",
+    "Dosage": "Dosage",
+    "PKG SIZE": "Pkg Size",
+    "PKG QTY": "Pkg Qty",
+    "BILLUNITS": "Bill Units",
+    "BILLUNITSPKG": "Bill Units Per Pkg",
+}
+
 
 def normalize_ndc(ndc: str) -> str:
     """Normalize NDC to 11-digit format, preserving leading zeros.
@@ -200,6 +221,59 @@ def normalize_asp_pricing(df: pl.DataFrame) -> pl.DataFrame:
             .cast(pl.Float64, strict=False)
             .alias("Payment Limit")
         )
+
+    return df
+
+
+def normalize_noc_pricing(df: pl.DataFrame) -> pl.DataFrame:
+    """Normalize NOC pricing file to standard schema.
+
+    NOC pricing provides fallback reimbursement rates for drugs
+    without permanent J-codes.
+
+    Args:
+        df: Raw NOC pricing DataFrame.
+
+    Returns:
+        Normalized NOC pricing DataFrame with standard column names.
+    """
+    logger.info(f"Normalizing NOC pricing with {df.height} rows")
+
+    # Apply column mapping
+    df = apply_column_mapping(df, NOC_PRICING_COLUMN_MAP)
+
+    # Ensure Payment Limit is numeric (may have $ prefix)
+    if "Payment Limit" in df.columns:
+        df = df.with_columns(
+            pl.col("Payment Limit")
+            .str.replace_all(r"[\$,]", "")
+            .cast(pl.Float64, strict=False)
+            .alias("Payment Limit")
+        )
+
+    return df
+
+
+def normalize_noc_crosswalk(df: pl.DataFrame) -> pl.DataFrame:
+    """Normalize NOC crosswalk file to standard schema.
+
+    NOC crosswalk maps NDCs to generic drug names for drugs
+    without permanent J-codes.
+
+    Args:
+        df: Raw NOC crosswalk DataFrame.
+
+    Returns:
+        Normalized NOC crosswalk DataFrame with standard column names.
+    """
+    logger.info(f"Normalizing NOC crosswalk with {df.height} rows")
+
+    # Apply column mapping
+    df = apply_column_mapping(df, NOC_CROSSWALK_COLUMN_MAP)
+
+    # Add normalized NDC
+    if "NDC" in df.columns:
+        df = normalize_ndc_column(df, ndc_column="NDC")
 
     return df
 

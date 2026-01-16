@@ -290,14 +290,14 @@ class TestCrosswalkJoin:
         # Create test data with 100 infusible drugs, 96 with crosswalk matches
         catalog = pl.DataFrame(
             {
-                "NDC": [f"{i:010d}" for i in range(100)],
+                "NDC": [f"{i:011d}" for i in range(100)],
             }
         )
         catalog = normalize_ndc_column(catalog, "NDC")
 
         crosswalk = pl.DataFrame(
             {
-                "NDC": [f"{i:010d}" for i in range(96)],
+                "NDC": [f"{i:011d}" for i in range(96)],
                 "HCPCS Code": [f"J{i:04d}" for i in range(96)],
             }
         )

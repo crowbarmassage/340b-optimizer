@@ -63,7 +63,7 @@ Before writing any code, read and follow:
 ### Data Handling
 - Use **Polars** for DataFrame operations (performance on 34k+ rows)
 - Use **pandas + openpyxl** for Excel file I/O only (then convert to Polars)
-- NDC normalization: Always 10-digit, zero-padded
+- NDC normalization: Always 11-digit, zero-padded (preserves leading zeros)
 - Fuzzy matching threshold: 80% for drug name alignment
 
 ### Margin Calculations
@@ -157,7 +157,7 @@ Source data files for testing are in:
 
 ## Common Pitfalls to Avoid
 
-1. **NDC Format Mismatches** — Always normalize to 10 digits before joining
+1. **NDC Format Mismatches** — Always normalize to 11 digits before joining
 2. **Float Precision** — Use `Decimal` for all financial calculations
 3. **Empty Crosswalk Columns** — ASP crosswalk file has 250 columns, only 9-10 populated
 4. **CSV Encoding** — CMS files are latin-1, not UTF-8

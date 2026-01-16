@@ -199,7 +199,7 @@ class TestPennyPricing:
     def test_penny_pricing_flag(self) -> None:
         """Drugs with penny pricing should be flagged."""
         nadac_df = pl.DataFrame({
-            "ndc": ["1234567890", "9876543210"],
+            "ndc": ["12345678901", "98765432101"],
             "penny_pricing": [True, False],
             "total_discount_340b_pct": [99.9, 50.0],
         })
@@ -207,7 +207,7 @@ class TestPennyPricing:
         flagged = check_penny_pricing(nadac_df)
 
         assert len(flagged) == 1
-        assert flagged[0]["ndc"] == "1234567890"
+        assert flagged[0]["ndc"] == "12345678901"
         assert flagged[0]["is_penny_priced"] is True
         assert flagged[0]["should_exclude"] is True
 

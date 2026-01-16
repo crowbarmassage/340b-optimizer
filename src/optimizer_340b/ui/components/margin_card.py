@@ -19,7 +19,7 @@ def render_margin_card(analysis: MarginAnalysis) -> None:
 
     # Header with drug info
     st.subheader(f"{drug.drug_name}")
-    st.caption(f"NDC: {drug.ndc} | Manufacturer: {drug.manufacturer}")
+    st.caption(f"NDC: {drug.ndc_formatted} | Manufacturer: {drug.manufacturer}")
 
     # Create three columns for margin comparison
     col1, col2, col3 = st.columns(3)

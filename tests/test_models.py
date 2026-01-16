@@ -79,6 +79,23 @@ class TestDrug:
         assert drug.ndc_normalized == "00074433902"
         assert len(drug.ndc_normalized) == 11
 
+    def test_ndc_formatted_returns_5_4_2_format(self, sample_drug: Drug) -> None:
+        """NDC formatted should return 5-4-2 format with dashes."""
+        # sample_drug has ndc="0074-4339-02" which normalizes to "00074433902"
+        assert sample_drug.ndc_formatted == "00074-4339-02"
+
+    def test_ndc_formatted_pads_short_ndc(self) -> None:
+        """Short NDCs should be padded and formatted as 5-4-2."""
+        drug = Drug(
+            ndc="12345",
+            drug_name="TEST",
+            manufacturer="TEST",
+            contract_cost=Decimal("10.00"),
+            awp=Decimal("100.00"),
+        )
+        # "12345" -> normalized "00000012345" -> formatted "00000-0123-45"
+        assert drug.ndc_formatted == "00000-0123-45"
+
     def test_drug_default_values(self) -> None:
         """Drug should have sensible defaults for optional fields."""
         drug = Drug(

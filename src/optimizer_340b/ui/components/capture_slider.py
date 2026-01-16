@@ -35,43 +35,21 @@ def render_capture_slider(
         "captured through retail pharmacy."
     )
 
-    # Preset buttons
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        if st.button("40%", key=f"{key}_40"):
-            st.session_state[key] = 0.40
-
-    with col2:
-        if st.button("45%", key=f"{key}_45"):
-            st.session_state[key] = 0.45
-
-    with col3:
-        if st.button("60%", key=f"{key}_60"):
-            st.session_state[key] = 0.60
-
-    with col4:
-        if st.button("100%", key=f"{key}_100"):
-            st.session_state[key] = 1.00
-
-    # Get current value from session state or use default
-    current_value = st.session_state.get(key, default)
-
-    # Slider
-    capture_rate = st.slider(
+    # Slider with default value of 45% (using 0-100 scale for display)
+    capture_pct = st.slider(
         label="Capture Rate",
-        min_value=0.0,
-        max_value=1.0,
-        value=float(current_value),
-        step=0.05,
-        format="%.0f%%",
-        key=f"{key}_slider",
+        min_value=0,
+        max_value=100,
+        value=int(default * 100),
+        step=5,
+        format="%d%%",
+        key=key,
         label_visibility="collapsed",
         help="Drag to adjust capture rate. Lower rates reduce retail margins.",
     )
 
-    # Store in session state
-    st.session_state[key] = capture_rate
+    # Convert back to decimal (0.0-1.0)
+    capture_rate = capture_pct / 100.0
 
     # Display impact info
     if capture_rate < 0.45:

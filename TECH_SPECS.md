@@ -128,7 +128,7 @@ The system uses a **batch pre-compute + interactive query** architecture where t
 @dataclass
 class Drug:
     """Core drug entity combining catalog and pricing data."""
-    ndc: str                          # 10-digit normalized NDC
+    ndc: str                          # 11-digit normalized NDC
     drug_name: str                    # Trade name
     manufacturer: str
     contract_cost: Decimal            # 340B acquisition cost
@@ -289,9 +289,9 @@ class Drug:
 
     @property
     def ndc_normalized(self) -> str:
-        """Return 10-digit normalized NDC."""
+        """Return 11-digit normalized NDC with leading zeros preserved."""
         cleaned = self.ndc.replace("-", "").replace(" ", "")
-        return cleaned.zfill(10)[-10:]
+        return cleaned.zfill(11)[-11:]
 
 
 @dataclass
@@ -790,7 +790,7 @@ This application does not expose external HTTP APIs. The internal data flow is:
 │                                                                              │
 │   normalizers.py                                                             │
 │   ┌──────────────────────────────────────────────────────────────┐          │
-│   │ normalize_ndc()         # 10-digit standardization           │          │
+│   │ normalize_ndc()         # 11-digit standardization           │          │
 │   │ fuzzy_match_drug_names() # Match biologics grid to catalog   │          │
 │   │ join_ndc_to_hcpcs()     # Crosswalk integration              │          │
 │   └──────────────────────────────────────────────────────────────┘          │

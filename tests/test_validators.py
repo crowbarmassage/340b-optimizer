@@ -113,7 +113,7 @@ class TestCatalogRowVolume:
 
     def test_sufficient_rows_passes(self) -> None:
         """Catalog with enough rows should pass."""
-        df = pl.DataFrame({"NDC": [f"{i:010d}" for i in range(35000)]})
+        df = pl.DataFrame({"NDC": [f"{i:011d}" for i in range(35000)]})
 
         result = validate_catalog_row_volume(df, min_rows=30000)
 
@@ -248,10 +248,10 @@ class TestCrosswalkIntegrity:
 
     def test_high_match_rate_passes(self) -> None:
         """Match rate above threshold should pass."""
-        catalog = pl.DataFrame({"NDC": [f"{i:010d}" for i in range(100)]})
+        catalog = pl.DataFrame({"NDC": [f"{i:011d}" for i in range(100)]})
         crosswalk = pl.DataFrame(
             {
-                "NDC": [f"{i:010d}" for i in range(96)],  # 96% match
+                "NDC": [f"{i:011d}" for i in range(96)],  # 96% match
                 "HCPCS Code": [f"J{i:04d}" for i in range(96)],
             }
         )
@@ -263,10 +263,10 @@ class TestCrosswalkIntegrity:
 
     def test_low_match_rate_fails(self) -> None:
         """Match rate below threshold should fail."""
-        catalog = pl.DataFrame({"NDC": [f"{i:010d}" for i in range(100)]})
+        catalog = pl.DataFrame({"NDC": [f"{i:011d}" for i in range(100)]})
         crosswalk = pl.DataFrame(
             {
-                "NDC": [f"{i:010d}" for i in range(50)],  # 50% match
+                "NDC": [f"{i:011d}" for i in range(50)],  # 50% match
                 "HCPCS Code": [f"J{i:04d}" for i in range(50)],
             }
         )
@@ -278,10 +278,10 @@ class TestCrosswalkIntegrity:
 
     def test_custom_threshold(self) -> None:
         """Should respect custom match rate threshold."""
-        catalog = pl.DataFrame({"NDC": [f"{i:010d}" for i in range(100)]})
+        catalog = pl.DataFrame({"NDC": [f"{i:011d}" for i in range(100)]})
         crosswalk = pl.DataFrame(
             {
-                "NDC": [f"{i:010d}" for i in range(80)],
+                "NDC": [f"{i:011d}" for i in range(80)],
                 "HCPCS Code": [f"J{i:04d}" for i in range(80)],
             }
         )
@@ -305,7 +305,7 @@ class TestTop50DrugsPricing:
         df = pl.DataFrame(
             {
                 "Drug Name": drugs,
-                "NDC": [f"{i:010d}" for i in range(len(drugs))],
+                "NDC": [f"{i:011d}" for i in range(len(drugs))],
                 "Contract Cost": [100.0] * len(drugs),
                 "AWP": [500.0] * len(drugs),
             }
@@ -322,7 +322,7 @@ class TestTop50DrugsPricing:
         df = pl.DataFrame(
             {
                 "Drug Name": drugs,
-                "NDC": [f"{i:010d}" for i in range(len(drugs))],
+                "NDC": [f"{i:011d}" for i in range(len(drugs))],
                 "Contract Cost": [100.0] * len(drugs),
                 "AWP": [500.0] * len(drugs),
             }
@@ -340,7 +340,7 @@ class TestTop50DrugsPricing:
         df = pl.DataFrame(
             {
                 "Drug Name": drugs,
-                "NDC": [f"{i:010d}" for i in range(len(drugs))],
+                "NDC": [f"{i:011d}" for i in range(len(drugs))],
                 "Contract Cost": contract_costs,
                 "AWP": [500.0] * len(drugs),
             }

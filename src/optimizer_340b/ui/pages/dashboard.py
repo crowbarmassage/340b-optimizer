@@ -10,10 +10,6 @@ from optimizer_340b.compute.margins import analyze_drug_margin
 from optimizer_340b.models import Drug, MarginAnalysis
 from optimizer_340b.risk import check_ira_status
 from optimizer_340b.ui.components.capture_slider import render_capture_slider
-from optimizer_340b.ui.components.risk_badge import (
-    render_ira_badge_inline,
-    render_penny_badge_inline,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -37,25 +33,33 @@ def render_dashboard_page() -> None:
         )
         return
 
-    # Sidebar controls
-    with st.sidebar:
-        st.markdown("### Analysis Controls")
-        capture_rate = render_capture_slider()
-
-        st.markdown("---")
-        st.markdown("### Filters")
-        show_ira_only = st.checkbox("Show IRA drugs only", value=False)
-        hide_penny = st.checkbox("Hide penny pricing drugs", value=True)
-        min_delta = st.number_input(
-            "Minimum margin delta ($)",
-            min_value=0,
-            max_value=10000,
-            value=100,
-            step=50,
-        )
-
     # Main content
     _render_summary_metrics()
+
+    st.markdown("---")
+
+    # Controls in main panel (capture rate affects delta calculations)
+    st.markdown("### Analysis Controls")
+
+    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 1, 1])
+
+    with ctrl_col1:
+        capture_rate = render_capture_slider(key="dashboard_capture")
+
+    with ctrl_col2:
+        st.markdown("**Filters**")
+        show_ira_only = st.checkbox("Show IRA drugs only", value=False)
+        hide_penny = st.checkbox("Hide penny pricing drugs", value=False)
+
+    with ctrl_col3:
+        st.markdown("&nbsp;")  # Spacer for alignment
+        min_delta = st.number_input(
+            "Min margin delta ($)",
+            min_value=0,
+            max_value=10000,
+            value=0,
+            step=50,
+        )
 
     st.markdown("---")
 
@@ -69,8 +73,8 @@ def render_dashboard_page() -> None:
     # Get and display opportunities
     opportunities = _calculate_opportunities(capture_rate)
 
-    # Apply filters
-    filtered = _apply_filters(
+    # Apply filters with context
+    filtered, filter_context = _apply_filters_with_context(
         opportunities,
         search_query=search_query,
         show_ira_only=show_ira_only,
@@ -78,7 +82,8 @@ def render_dashboard_page() -> None:
         min_delta=Decimal(str(min_delta)),
     )
 
-    st.markdown(f"**Showing {len(filtered)} of {len(opportunities)} drugs**")
+    # Show filter context
+    _render_filter_summary(filtered, filter_context, search_query)
 
     # Render opportunity table
     _render_opportunity_table(filtered)
@@ -140,6 +145,8 @@ def _calculate_opportunities(capture_rate: Decimal) -> list[MarginAnalysis]:
     asp_pricing = uploaded.get("asp_pricing")
     crosswalk = uploaded.get("crosswalk")
     nadac = uploaded.get("nadac")
+    noc_pricing = uploaded.get("noc_pricing")
+    noc_crosswalk = uploaded.get("noc_crosswalk")
 
     if catalog is None:
         return []
@@ -149,11 +156,12 @@ def _calculate_opportunities(capture_rate: Decimal) -> list[MarginAnalysis]:
 
     # Prepare lookup tables
     hcpcs_lookup = _build_hcpcs_lookup(crosswalk, asp_pricing)
+    noc_lookup = _build_noc_lookup(noc_crosswalk, noc_pricing)
     nadac_lookup = _build_nadac_lookup(nadac)
 
     for row in catalog.iter_rows(named=True):
         try:
-            drug = _row_to_drug(row, hcpcs_lookup, nadac_lookup)
+            drug = _row_to_drug(row, hcpcs_lookup, nadac_lookup, noc_lookup)
             if drug is not None:
                 analysis = analyze_drug_margin(drug, capture_rate)
                 analyses.append(analysis)
@@ -253,10 +261,69 @@ def _build_nadac_lookup(nadac: pl.DataFrame | None) -> dict[str, dict[str, objec
     return lookup
 
 
+def _build_noc_lookup(
+    noc_crosswalk: pl.DataFrame | None,
+    noc_pricing: pl.DataFrame | None,
+) -> dict[str, dict[str, object]]:
+    """Build NOC lookup for drugs without permanent J-codes.
+
+    NOC (Not Otherwise Classified) provides fallback pricing for new drugs
+    that don't yet have a permanent HCPCS code.
+
+    Returns:
+        Dictionary mapping normalized NDC to NOC pricing info.
+    """
+    if noc_crosswalk is None or noc_pricing is None:
+        return {}
+
+    lookup: dict[str, dict[str, object]] = {}
+
+    # Build pricing lookup by generic drug name
+    pricing_lookup: dict[str, float] = {}
+    if "Drug Generic Name" in noc_pricing.columns and "Payment Limit" in noc_pricing.columns:
+        for row in noc_pricing.iter_rows(named=True):
+            drug_name = row.get("Drug Generic Name")
+            payment = row.get("Payment Limit")
+            if drug_name and payment:
+                try:
+                    # Normalize name for matching
+                    pricing_lookup[str(drug_name).upper().strip()] = float(payment)
+                except (ValueError, TypeError):
+                    continue
+
+    # Build NDC lookup from crosswalk
+    ndc_col = "NDC" if "NDC" in noc_crosswalk.columns else "NDC or ALTERNATE ID"
+    generic_col = "Drug Generic Name"
+    bill_units_col = "Bill Units Per Pkg" if "Bill Units Per Pkg" in noc_crosswalk.columns else "BILLUNITSPKG"
+
+    if ndc_col not in noc_crosswalk.columns or generic_col not in noc_crosswalk.columns:
+        return {}
+
+    for row in noc_crosswalk.iter_rows(named=True):
+        ndc = str(row.get(ndc_col, "")).replace("-", "").strip()
+        generic_name = str(row.get(generic_col, "")).upper().strip()
+
+        if ndc and generic_name:
+            # Look up payment from pricing file
+            asp = pricing_lookup.get(generic_name)
+            bill_units = row.get(bill_units_col, 1) or 1
+
+            if asp is not None:
+                lookup[ndc] = {
+                    "generic_name": generic_name,
+                    "asp": asp,
+                    "bill_units": int(bill_units) if bill_units else 1,
+                    "is_noc": True,
+                }
+
+    return lookup
+
+
 def _row_to_drug(
     row: dict[str, object],
     hcpcs_lookup: dict[str, dict[str, object]],
     nadac_lookup: dict[str, dict[str, object]],
+    noc_lookup: dict[str, dict[str, object]] | None = None,
 ) -> Drug | None:
     """Convert a catalog row to a Drug object.
 
@@ -264,6 +331,7 @@ def _row_to_drug(
         row: Row from catalog DataFrame.
         hcpcs_lookup: HCPCS/ASP lookup by NDC.
         nadac_lookup: NADAC lookup by NDC.
+        noc_lookup: NOC fallback lookup by NDC (for drugs without J-codes).
 
     Returns:
         Drug object or None if invalid.
@@ -300,11 +368,20 @@ def _row_to_drug(
     except Exception:
         return None
 
-    # Lookup HCPCS/ASP info
+    # Lookup HCPCS/ASP info (primary source)
     hcpcs_info = hcpcs_lookup.get(ndc_normalized, {})
     asp = hcpcs_info.get("asp")
     hcpcs_code = hcpcs_info.get("hcpcs_code")
     bill_units = hcpcs_info.get("bill_units", 1)
+
+    # NOC fallback: if not in ASP crosswalk, check NOC crosswalk
+    if asp is None and noc_lookup:
+        noc_info = noc_lookup.get(ndc_normalized, {})
+        if noc_info:
+            asp = noc_info.get("asp")
+            bill_units = noc_info.get("bill_units", 1)
+            # NOC drugs use generic codes, mark as NOC for display
+            hcpcs_code = "NOC"  # Indicates Not Otherwise Classified
 
     # Lookup NADAC info
     nadac_info = nadac_lookup.get(ndc_normalized, {})
@@ -371,6 +448,97 @@ def _apply_filters(
     return filtered
 
 
+def _apply_filters_with_context(
+    analyses: list[MarginAnalysis],
+    search_query: str = "",
+    show_ira_only: bool = False,
+    hide_penny: bool = True,
+    min_delta: Decimal = Decimal("0"),
+) -> tuple[list[MarginAnalysis], dict[str, int]]:
+    """Apply filters and return context about what was filtered.
+
+    Returns:
+        Tuple of (filtered list, context dict with counts).
+    """
+    context: dict[str, int] = {
+        "total": len(analyses),
+        "search_matches": 0,
+        "hidden_by_ira": 0,
+        "hidden_by_penny": 0,
+        "hidden_by_delta": 0,
+    }
+
+    filtered = analyses
+
+    # Search filter
+    if search_query:
+        query = search_query.upper()
+        search_results = [
+            a for a in filtered
+            if query in a.drug.drug_name.upper() or query in a.drug.ndc
+        ]
+        context["search_matches"] = len(search_results)
+        filtered = search_results
+    else:
+        context["search_matches"] = len(filtered)
+
+    # IRA filter
+    if show_ira_only:
+        before_ira = len(filtered)
+        filtered = [a for a in filtered if a.drug.ira_flag]
+        context["hidden_by_ira"] = before_ira - len(filtered)
+
+    # Penny pricing filter
+    if hide_penny:
+        before_penny = len(filtered)
+        filtered = [a for a in filtered if not a.drug.penny_pricing_flag]
+        context["hidden_by_penny"] = before_penny - len(filtered)
+
+    # Margin delta filter
+    before_delta = len(filtered)
+    filtered = [a for a in filtered if a.margin_delta >= min_delta]
+    context["hidden_by_delta"] = before_delta - len(filtered)
+
+    return filtered, context
+
+
+def _render_filter_summary(
+    filtered: list[MarginAnalysis],
+    context: dict[str, int],
+    search_query: str,
+) -> None:
+    """Render summary of filtering results."""
+    if search_query:
+        # Show search-specific context
+        matches = context["search_matches"]
+        shown = len(filtered)
+        hidden = matches - shown
+
+        if hidden > 0:
+            st.markdown(
+                f"**Showing {shown} of {matches} drugs matching '{search_query}'** "
+                f"({hidden} hidden by filters)"
+            )
+            # Show breakdown of what's hidden
+            details = []
+            if context["hidden_by_penny"] > 0:
+                details.append(f"{context['hidden_by_penny']} penny-priced")
+            if context["hidden_by_delta"] > 0:
+                details.append(f"{context['hidden_by_delta']} below min delta")
+            if context["hidden_by_ira"] > 0:
+                details.append(f"{context['hidden_by_ira']} non-IRA")
+            if details:
+                st.caption(f"Hidden: {', '.join(details)}")
+        else:
+            st.markdown(
+                f"**Showing {shown} drug{'s' if shown != 1 else ''} "
+                f"matching '{search_query}'**"
+            )
+    else:
+        # No search - show total context
+        st.markdown(f"**Showing {len(filtered)} of {context['total']} drugs**")
+
+
 def _render_opportunity_table(analyses: list[MarginAnalysis]) -> None:
     """Render the opportunity table with clickable rows."""
     if not analyses:
@@ -383,12 +551,13 @@ def _render_opportunity_table(analyses: list[MarginAnalysis]) -> None:
     for analysis in analyses[:100]:  # Limit to top 100 for performance
         drug = analysis.drug
 
-        # Build risk badges HTML
-        badges = ""
+        # Build risk flags as plain text (HTML doesn't render in dataframes)
+        flags = []
         if drug.ira_flag:
-            badges += render_ira_badge_inline(drug.drug_name) + " "
+            flags.append("⚠️ IRA")
         if drug.penny_pricing_flag:
-            badges += render_penny_badge_inline(True)
+            flags.append("💰 Penny")
+        risk_text = " | ".join(flags) if flags else ""
 
         # Determine best margin
         best_margin = analysis.retail_net_margin
@@ -399,7 +568,7 @@ def _render_opportunity_table(analyses: list[MarginAnalysis]) -> None:
 
         table_data.append({
             "Drug": drug.drug_name,
-            "NDC": drug.ndc,
+            "NDC": drug.ndc_formatted,
             "Best Margin": f"${best_margin:,.2f}",
             "Retail": f"${analysis.retail_net_margin:,.2f}",
             "Medicare": (
@@ -412,7 +581,7 @@ def _render_opportunity_table(analyses: list[MarginAnalysis]) -> None:
             ),
             "Recommendation": analysis.recommended_path.value.replace("_", " "),
             "Delta": f"${analysis.margin_delta:,.2f}",
-            "Risk": badges,
+            "Risk": risk_text,
         })
 
     # Create DataFrame

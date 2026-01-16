@@ -113,19 +113,29 @@ def _get_or_search_drug() -> Drug | None:
         else:
             st.error("Drug not found. Please check the name or NDC.")
 
-    # Demo mode with sample drug
+    # Demo mode - search for actual drugs in uploaded data
     st.markdown("---")
     st.info("Or try a demo drug:")
 
-    if st.button("Demo: HUMIRA"):
-        drug = _create_demo_drug("HUMIRA")
-        st.session_state.selected_drug = drug.ndc
-        return drug
+    col1, col2 = st.columns(2)
 
-    if st.button("Demo: ENBREL (IRA 2026)"):
-        drug = _create_demo_drug("ENBREL")
-        st.session_state.selected_drug = drug.ndc
-        return drug
+    with col1:
+        if st.button("Demo: HUMIRA"):
+            drug = _search_drug("HUMIRA")
+            if drug:
+                st.session_state.selected_drug = drug.ndc
+                return drug
+            else:
+                st.warning("HUMIRA not found in uploaded data.")
+
+    with col2:
+        if st.button("Demo: ENBREL (IRA 2026)"):
+            drug = _search_drug("ENBREL")
+            if drug:
+                st.session_state.selected_drug = drug.ndc
+                return drug
+            else:
+                st.warning("ENBREL not found in uploaded data.")
 
     return None
 
@@ -226,7 +236,7 @@ def _create_demo_drug(name: str) -> Drug:
     """Create a demo drug for testing."""
     if name == "ENBREL":
         return Drug(
-            ndc="5555555555",
+            ndc="55555555555",  # 11-digit NDC
             drug_name="ENBREL",
             manufacturer="AMGEN",
             contract_cost=Decimal("200.00"),
@@ -241,7 +251,7 @@ def _create_demo_drug(name: str) -> Drug:
         )
     else:  # HUMIRA
         return Drug(
-            ndc="0074-4339-02",
+            ndc="00074433902",  # 11-digit NDC (00074-4339-02)
             drug_name="HUMIRA",
             manufacturer="ABBVIE",
             contract_cost=Decimal("150.00"),
@@ -262,7 +272,7 @@ def _render_drug_header(drug: Drug) -> None:
 
     with col1:
         st.header(drug.drug_name)
-        st.caption(f"NDC: {drug.ndc}")
+        st.caption(f"NDC: {drug.ndc_formatted}")
         st.caption(f"Manufacturer: {drug.manufacturer}")
 
         if drug.therapeutic_class:
