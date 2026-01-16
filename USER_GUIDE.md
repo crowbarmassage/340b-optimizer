@@ -30,10 +30,9 @@ The app opens in your browser at `http://localhost:8501`.
 
 ### Quick Start (Recommended for First-Time Users)
 
-1. Click **"Load Sample Data"** on the Upload page
-2. Click **"Process Data"** button
-3. Select **"Dashboard"** from the sidebar
-4. Explore 34,229 drugs with pre-loaded data
+1. Click **"Load & Process Sample Data"** on the Upload page (loads and processes in one click)
+2. Select **"Dashboard"** from the sidebar
+3. Explore 34,229 drugs with pre-loaded data
 
 ---
 
@@ -47,12 +46,17 @@ The app has three main pages, accessible via the **sidebar radio buttons**:
 
 | Section | Description |
 |---------|-------------|
-| Quick Start | One-click sample data loading |
+| Quick Start | One-click sample data loading and processing |
 | Product Catalog | Your 340B contract pricing (required) |
 | ASP Pricing File | CMS Medicare payment limits (required) |
 | NDC-HCPCS Crosswalk | Billing code mapping (required) |
+| NOC Pricing File | Fallback pricing for drugs without J-codes (optional) |
+| NOC Crosswalk | Fallback NDC mapping for NOC drugs (optional) |
 | NADAC Statistics | Penny pricing detection (optional) |
 | Biologics Logic Grid | Loading dose profiles (optional) |
+| AWP Reimbursement Matrix | Payer-specific AWP multipliers (optional) |
+| Wholesaler Catalog | Retail price validation (optional) |
+| IRA Drug List | IRA 2026/2027 negotiated drugs (optional) |
 | Upload Status | Shows which files are loaded |
 | Process Data | Normalizes and joins data for analysis |
 
@@ -65,7 +69,7 @@ The app has three main pages, accessible via the **sidebar radio buttons**:
 | Summary Metrics | Total drugs, HCPCS mappings, medical eligible, penny pricing counts |
 | Analysis Controls | Capture rate slider (sidebar) |
 | Filters | IRA drugs only, hide penny pricing, minimum margin delta |
-| Search | Find drugs by name or NDC |
+| Search | Find drugs by name or NDC (supports `12345678901` and `12345-6789-01` formats) |
 | Opportunity Table | Ranked list with margins and recommendations |
 | Drug Detail Links | Quick access to top 5 drugs |
 
@@ -175,6 +179,64 @@ NDC2,_2025_CODE,Billing Units Per Package
 | `Year 1 Fills` | Yes | Fills including loading doses | `17` |
 | `Year 2+ Fills` | Yes | Maintenance fills per year | `12` |
 
+### 6. NOC Pricing File (Optional)
+
+**Format**: CSV
+**Note**: CMS files have 12 header rows that are automatically skipped.
+
+| Column | Required | Description | Example |
+|--------|----------|-------------|---------|
+| `Drug Generic Name` | Yes | Generic drug name | `PEMBROLIZUMAB` |
+| `Payment Limit` | Yes | NOC payment amount | `5270.11` |
+
+**Purpose**: Provides fallback pricing for drugs without permanent J-codes.
+
+### 7. NOC Crosswalk (Optional)
+
+**Format**: CSV
+**Note**: CMS files have 9 header rows that are automatically skipped.
+
+| Column | Required | Description | Example |
+|--------|----------|-------------|---------|
+| `NDC` or `NDC or ALTERNATE ID` | Yes | NDC code | `00006307761` |
+| `Drug Generic Name` | Yes | Generic drug name | `PEMBROLIZUMAB` |
+
+**Purpose**: Maps NDCs to generic drug names for NOC pricing lookup.
+
+### 8. AWP Reimbursement Matrix (Optional)
+
+**Format**: Excel (.xlsx, .xls)
+
+| Sheet | Description |
+|-------|-------------|
+| `Drug Categories` | Maps drugs to Generic/Brand/Specialty categories |
+| `Summary` | Payer mix and multiplier information |
+
+**Purpose**: Provides payer-specific AWP multipliers (e.g., Commercial Brand = 84% AWP, Generic = 15% AWP).
+
+### 9. Wholesaler Catalog (Optional)
+
+**Format**: Excel (.xlsx, .xls)
+
+| Column | Required | Description | Example |
+|--------|----------|-------------|---------|
+| `Product Catalog NDC` | Yes | NDC code | `00074433902` |
+| `Unit Price` | Yes | Actual retail price | `6200.00` |
+
+**Purpose**: Validates calculated retail prices against actual market prices. Flags records where variance exceeds 20%.
+
+### 10. IRA Drug List (Optional)
+
+**Format**: CSV
+
+| Column | Required | Description | Example |
+|--------|----------|-------------|---------|
+| `drug_name` | Yes | Drug trade name | `ENBREL` |
+| `ira_year` | Yes | IRA negotiation year | `2026` |
+| `description` | Yes | Drug description | `Autoimmune (etanercept)` |
+
+**Purpose**: Data-driven IRA drug detection. Update this file to reflect new IRA negotiations without code changes.
+
 ---
 
 ## Using the Dashboard
@@ -189,7 +251,7 @@ NDC2,_2025_CODE,Billing Units Per Package
    - Check "Show IRA drugs only" to focus on at-risk drugs
    - Check "Hide penny pricing drugs" (default) to exclude low-margin items
    - Set minimum margin delta to filter small opportunities
-6. **Search**: Type drug name or NDC in search box
+6. **Search**: Type drug name or NDC in search box (NDC supports both `12345678901` and `12345-6789-01` formats)
 7. **Review Results**: Table shows ranked opportunities
 8. **Drill Down**: Click drug name to select, then go to Drug Detail
 
@@ -428,4 +490,4 @@ For issues or questions:
 
 ---
 
-*Last updated: January 2026*
+*Last updated: January 16, 2026*
