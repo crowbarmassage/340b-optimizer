@@ -421,6 +421,9 @@ def _row_to_drug(
     inflation_penalty = nadac_info.get("inflation_penalty_pct")
     has_inflation_flag = nadac_info.get("has_inflation_penalty", False)
 
+    # Get NADAC price (most recent)
+    nadac_price = nadac_info.get("nadac_price")
+
     # Check IRA status
     ira_status = check_ira_status(str(drug_name))
     ira_flag = ira_status.get("is_ira_drug", False)
@@ -439,6 +442,7 @@ def _row_to_drug(
         bill_units_per_package=int(str(bill_units)) if bill_units else 1,
         ira_flag=bool(ira_flag),
         penny_pricing_flag=bool(penny_pricing),
+        nadac_price=nadac_price,
     )
 
 

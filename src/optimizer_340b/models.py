@@ -38,6 +38,7 @@ class Drug:
         is_biologic: Whether the drug is a biologic (affects dosing logic).
         ira_flag: Whether subject to IRA price negotiation.
         penny_pricing_flag: Whether NADAC is at 340B floor.
+        nadac_price: National Average Drug Acquisition Cost (most recent).
     """
 
     ndc: str
@@ -52,6 +53,7 @@ class Drug:
     is_biologic: bool = False
     ira_flag: bool = False
     penny_pricing_flag: bool = False
+    nadac_price: Decimal | None = None
 
     def has_medical_path(self) -> bool:
         """Check if drug can be billed through medical channel.

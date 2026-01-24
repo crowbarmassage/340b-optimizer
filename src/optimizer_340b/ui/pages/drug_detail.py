@@ -243,6 +243,9 @@ def _row_to_drug(row: dict[str, object]) -> Drug:
     hcpcs_code = hcpcs_info.get("hcpcs_code")
     bill_units = hcpcs_info.get("bill_units", 1)
 
+    # Get NADAC price (most recent)
+    nadac_price = nadac_info.get("nadac_price")
+
     return Drug(
         ndc=ndc,
         drug_name=str(drug_name),
@@ -253,7 +256,8 @@ def _row_to_drug(row: dict[str, object]) -> Drug:
         hcpcs_code=str(hcpcs_code) if hcpcs_code else None,
         bill_units_per_package=int(str(bill_units)) if bill_units else 1,
         ira_flag=bool(ira_status.get("is_ira_drug", False)),
-        penny_pricing_flag=bool(nadac_info.get("penny_pricing", False)),
+        penny_pricing_flag=bool(nadac_info.get("is_penny_priced", False)),
+        nadac_price=nadac_price,
     )
 
 
@@ -315,8 +319,12 @@ def _render_drug_header(drug: Drug) -> None:
     # Comprehensive Price Reference Section
     st.markdown("---")
     st.markdown("### Price Reference")
+    st.warning(
+        "**Note:** Unit consistency under review. Prices may be per unit, per package, "
+        "or per billing unit depending on source. Verify units before comparing."
+    )
 
-    price_col1, price_col2, price_col3, price_col4 = st.columns(4)
+    price_col1, price_col2, price_col3, price_col4, price_col5 = st.columns(5)
 
     with price_col1:
         st.markdown("**Acquisition Cost**")
@@ -331,24 +339,35 @@ def _render_drug_header(drug: Drug) -> None:
         st.caption("Used for retail margin")
 
     with price_col3:
+        if drug.nadac_price:
+            st.markdown("**NADAC**")
+            st.markdown(f"**${drug.nadac_price:,.2f}**")
+            st.caption("Natl Avg Drug Acquisition Cost")
+            st.caption("Market acquisition price")
+        else:
+            st.markdown("**NADAC**")
+            st.markdown("N/A")
+            st.caption("Not in NADAC data")
+
+    with price_col4:
         if drug.asp:
             st.markdown("**ASP (True)**")
             st.markdown(f"**${drug.asp:,.2f}**")
             st.caption("Average Sales Price")
-            st.caption("Back-calculated from Payment Limit")
+            st.caption("Back-calculated from CMS")
         else:
             st.markdown("**ASP**")
             st.markdown("N/A")
             st.caption("No HCPCS mapping")
 
-    with price_col4:
+    with price_col5:
         if drug.asp:
             # Calculate Payment Limit (ASP × 1.06) for display
             payment_limit = drug.asp * Decimal("1.06")
             st.markdown("**Payment Limit**")
             st.markdown(f"**${payment_limit:,.2f}**")
-            st.caption("CMS Published (ASP × 1.06)")
-            st.caption("Medicare reimbursement basis")
+            st.caption("CMS (ASP × 1.06)")
+            st.caption("Medicare reimburse basis")
         else:
             st.markdown("**Payment Limit**")
             st.markdown("N/A")

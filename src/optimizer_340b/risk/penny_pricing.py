@@ -318,6 +318,7 @@ def build_nadac_lookup(nadac_df: pl.DataFrame) -> dict[str, dict[str, object]]:
         - has_inflation_penalty: bool
         - inflation_penalty_pct: Decimal or None
         - discount_340b_pct: Decimal or None
+        - nadac_price: Decimal or None (last_price from NADAC)
     """
     lookup: dict[str, dict[str, object]] = {}
 
@@ -325,6 +326,7 @@ def build_nadac_lookup(nadac_df: pl.DataFrame) -> dict[str, dict[str, object]]:
     has_penny_col = "penny_pricing" in nadac_df.columns
     has_discount_col = "total_discount_340b_pct" in nadac_df.columns
     has_inflation_col = "inflation_penalty_pct" in nadac_df.columns
+    has_last_price_col = "last_price" in nadac_df.columns
 
     if "ndc" not in nadac_df.columns:
         logger.warning("NADAC data missing 'ndc' column")
@@ -370,6 +372,16 @@ def build_nadac_lookup(nadac_df: pl.DataFrame) -> dict[str, dict[str, object]]:
                 except (ValueError, TypeError):
                     pass
 
+        # Get NADAC price (last_price is the most recent NADAC)
+        nadac_price = None
+        if has_last_price_col:
+            price_val = row.get("last_price")
+            if price_val is not None:
+                try:
+                    nadac_price = Decimal(str(price_val))
+                except (ValueError, TypeError):
+                    pass
+
         # Build lookup entry
         lookup[ndc_normalized] = {
             "is_penny_priced": is_penny,
@@ -377,6 +389,7 @@ def build_nadac_lookup(nadac_df: pl.DataFrame) -> dict[str, dict[str, object]]:
             "has_inflation_penalty": has_inflation,
             "inflation_penalty_pct": inflation_pct,
             "discount_340b_pct": discount_pct,
+            "nadac_price": nadac_price,
         }
 
     logger.info(f"Built NADAC lookup with {len(lookup)} NDCs")
