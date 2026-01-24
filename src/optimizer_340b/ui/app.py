@@ -29,6 +29,7 @@ def main() -> None:
     # Import pages here to avoid E402 at module level
     from optimizer_340b.ui.pages.dashboard import render_dashboard_page
     from optimizer_340b.ui.pages.drug_detail import render_drug_detail_page
+    from optimizer_340b.ui.pages.manual_upload import render_manual_upload_page
     from optimizer_340b.ui.pages.upload import render_upload_page
 
     # Page configuration - must be first Streamlit command
@@ -44,6 +45,7 @@ def main() -> None:
         "Upload Data": render_upload_page,
         "Dashboard": render_dashboard_page,
         "Drug Detail": render_drug_detail_page,
+        "Manual Upload": render_manual_upload_page,
     }
 
     # Custom CSS
