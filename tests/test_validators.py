@@ -88,8 +88,9 @@ class TestCatalogValidation:
         result = validate_catalog_schema(df)
 
         assert result.is_valid is False
-        assert len(result.missing_columns) == 3
-        assert set(result.missing_columns) == {"NDC", "Contract Cost", "AWP"}
+        # Now requires NDC + AWP (2 columns), cost column checked separately
+        assert len(result.missing_columns) == 2
+        assert set(result.missing_columns) == {"NDC", "AWP"}
 
     def test_warns_on_missing_optional_columns(self) -> None:
         """Should warn when recommended columns are missing."""

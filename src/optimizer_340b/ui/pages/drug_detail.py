@@ -226,7 +226,13 @@ def _row_to_drug(row: dict[str, object]) -> Drug:
         or "Unknown"
     )
 
-    contract_cost = Decimal(str(row.get("Contract Cost", 0) or 0))
+    # Get contract cost (340B acquisition cost from Unit Price Current Catalog)
+    contract_cost_raw = (
+        row.get("Unit Price (Current Catalog)")
+        or row.get("Contract Cost")
+        or 0
+    )
+    contract_cost = Decimal(str(contract_cost_raw) if contract_cost_raw else "0")
     awp = Decimal(str(row.get("AWP") or row.get("Medispan AWP") or 0))
 
     hcpcs_info = hcpcs_lookup.get(ndc_normalized, {})

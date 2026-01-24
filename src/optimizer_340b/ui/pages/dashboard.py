@@ -361,8 +361,13 @@ def _row_to_drug(
     # Get manufacturer
     manufacturer = row.get("Manufacturer") or row.get("MANUFACTURER") or "Unknown"
 
-    # Get contract cost
-    contract_cost = row.get("Contract Cost") or row.get("CONTRACT_COST") or 0
+    # Get contract cost (340B acquisition cost from Unit Price Current Catalog)
+    contract_cost = (
+        row.get("Unit Price (Current Catalog)")
+        or row.get("Contract Cost")
+        or row.get("CONTRACT_COST")
+        or 0
+    )
     try:
         contract_cost = Decimal(str(contract_cost))
     except Exception:

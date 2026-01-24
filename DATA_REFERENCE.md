@@ -49,16 +49,21 @@ The primary drug catalog containing 340B contract pricing, AWP, and product deta
 | 10 | **Unit Dose** | Unit dose indicator |
 | 11 | **Contract Name** | Name of the 340B contract |
 | 12 | **Medispan AWP** | Average Wholesale Price from Medispan |
-| 13 | **Contract Cost** | 340B acquisition cost (what the entity pays) |
+| 13 | **Contract Cost** | Legacy cost field (use Unit Price Current Catalog instead) |
 | 14 | **Unit Price (Previous Catalog)** | Unit price from previous catalog |
-| 15 | **Unit Price (Current Catalog)** | Current catalog unit price |
-| 16 | **Unit Price (Current Retail)** | Current retail unit price |
+| 15 | **Unit Price (Current Catalog)** | **340B acquisition cost** (what the entity pays) - PRIMARY |
+| 16 | **Unit Price (Current Retail)** | Current retail unit price (NOT used for margin calc) |
 | 17 | **Gross Margin %** | Pre-calculated gross margin percentage |
 
 ### Key Usage
 - **NDC**: Primary join key to crosswalk files
-- **Contract Cost**: Used in margin calculations (acquisition cost)
+- **Unit Price (Current Catalog)**: 340B acquisition cost for margin calculations
 - **Medispan AWP**: Used for retail reimbursement calculations
+
+### Important Notes
+- **Unit Price (Current Catalog)** is the correct column for 340B acquisition cost
+- **Unit Price (Current Retail)** should NOT be used for margin calculations (retail price, not cost)
+- Falls back to **Contract Cost** if Unit Price (Current Catalog) is not available
 
 ---
 

@@ -9,7 +9,9 @@ logger = logging.getLogger(__name__)
 
 
 # Required columns for each data source
-CATALOG_REQUIRED_COLUMNS = {"NDC", "Contract Cost", "AWP"}
+# Note: Acquisition cost can be "Unit Price (Current Catalog)" OR "Contract Cost"
+CATALOG_REQUIRED_COLUMNS = {"NDC", "AWP"}
+CATALOG_COST_COLUMNS = {"Unit Price (Current Catalog)", "Contract Cost"}  # At least one required
 CATALOG_OPTIONAL_COLUMNS = {"Drug Name", "Manufacturer", "Gross Margin %"}
 
 ASP_PRICING_REQUIRED_COLUMNS = {"HCPCS Code", "Payment Limit"}
@@ -107,7 +109,8 @@ def validate_catalog_schema(df: pl.DataFrame) -> ValidationResult:
     """Validate product catalog schema.
 
     Gatekeeper Test: Schema Integrity
-    - Must contain NDC, Contract Cost, AWP columns.
+    - Must contain NDC, AWP columns
+    - Must contain at least one cost column: Unit Price (Current Catalog) OR Contract Cost
 
     Args:
         df: DataFrame to validate.
@@ -126,6 +129,19 @@ def validate_catalog_schema(df: pl.DataFrame) -> ValidationResult:
             row_count=df.height,
         )
 
+    # Check for at least one cost column
+    has_cost_column = bool(CATALOG_COST_COLUMNS & columns)
+    if not has_cost_column:
+        return ValidationResult(
+            is_valid=False,
+            message=(
+                f"Catalog missing cost column. "
+                f"Need one of: {sorted(CATALOG_COST_COLUMNS)}"
+            ),
+            missing_columns=sorted(CATALOG_COST_COLUMNS),
+            row_count=df.height,
+        )
+
     # Check for recommended columns
     warnings = []
     missing_optional = CATALOG_OPTIONAL_COLUMNS - columns
@@ -133,6 +149,10 @@ def validate_catalog_schema(df: pl.DataFrame) -> ValidationResult:
         warnings.append(
             f"Catalog missing recommended columns: {sorted(missing_optional)}"
         )
+
+    # Note which cost column is being used
+    cost_col_used = "Unit Price (Current Catalog)" if "Unit Price (Current Catalog)" in columns else "Contract Cost"
+    warnings.append(f"Using '{cost_col_used}' for 340B acquisition cost")
 
     return ValidationResult(
         is_valid=True,
