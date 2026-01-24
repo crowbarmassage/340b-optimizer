@@ -95,7 +95,22 @@ Medicare Part B Average Sales Price (ASP) payment allowance limits by HCPCS code
 
 ### Key Usage
 - **HCPCS Code**: Join key to ASP Crosswalk
-- **Payment Limit**: ASP value used in Medicare margin calculation (ASP × 1.06)
+- **Payment Limit**: CMS-published reimbursement amount (already includes 6% markup)
+
+### Important: Payment Limit vs True ASP
+The Payment Limit column **already includes the 6% Medicare markup**:
+```
+Payment Limit = True ASP × 1.06
+```
+
+To get the true ASP for margin calculations:
+```
+True ASP = Payment Limit / 1.06
+```
+
+This is critical for accurate margin calculations:
+- **Medicare**: `True ASP × 1.06 × Bill Units - Contract Cost`
+- **Commercial**: `True ASP × 1.15 × Bill Units - Contract Cost`
 
 ### Notes
 - File has 8 header rows of metadata that must be skipped when loading

@@ -303,13 +303,56 @@ def _render_drug_header(drug: Drug) -> None:
         if drug.therapeutic_class:
             st.caption(f"Class: {drug.therapeutic_class}")
 
+        if drug.hcpcs_code:
+            st.caption(f"HCPCS: {drug.hcpcs_code}")
+            st.caption(f"Bill Units/Pkg: {drug.bill_units_per_package}")
+
     with col2:
-        st.markdown("**Pricing**")
+        st.markdown("**Quick Reference**")
         st.metric("Contract Cost", f"${drug.contract_cost:,.2f}")
         st.metric("AWP", f"${drug.awp:,.2f}")
 
+    # Comprehensive Price Reference Section
+    st.markdown("---")
+    st.markdown("### Price Reference")
+
+    price_col1, price_col2, price_col3, price_col4 = st.columns(4)
+
+    with price_col1:
+        st.markdown("**Acquisition Cost**")
+        st.markdown(f"**${drug.contract_cost:,.2f}**")
+        st.caption("Unit Price (Current Catalog)")
+        st.caption("340B acquisition cost")
+
+    with price_col2:
+        st.markdown("**AWP**")
+        st.markdown(f"**${drug.awp:,.2f}**")
+        st.caption("Average Wholesale Price")
+        st.caption("Used for retail margin")
+
+    with price_col3:
         if drug.asp:
-            st.metric("ASP", f"${drug.asp:,.2f}")
+            st.markdown("**ASP (True)**")
+            st.markdown(f"**${drug.asp:,.2f}**")
+            st.caption("Average Sales Price")
+            st.caption("Back-calculated from Payment Limit")
+        else:
+            st.markdown("**ASP**")
+            st.markdown("N/A")
+            st.caption("No HCPCS mapping")
+
+    with price_col4:
+        if drug.asp:
+            # Calculate Payment Limit (ASP × 1.06) for display
+            payment_limit = drug.asp * Decimal("1.06")
+            st.markdown("**Payment Limit**")
+            st.markdown(f"**${payment_limit:,.2f}**")
+            st.caption("CMS Published (ASP × 1.06)")
+            st.caption("Medicare reimbursement basis")
+        else:
+            st.markdown("**Payment Limit**")
+            st.markdown("N/A")
+            st.caption("No HCPCS mapping")
 
 
 def _render_sensitivity_chart(drug: Drug) -> None:

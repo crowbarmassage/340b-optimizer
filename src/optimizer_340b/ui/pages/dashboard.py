@@ -228,6 +228,9 @@ def _build_hcpcs_lookup(
         return {}
 
     # Build ASP pricing lookup by HCPCS
+    # IMPORTANT: CMS Payment Limit already includes 6% markup (Payment Limit = ASP × 1.06)
+    # We must back-calculate the true ASP for correct margin calculations
+    PAYMENT_LIMIT_MARKUP = 1.06
     asp_lookup: dict[str, float] = {}
     payment_col = (
         "Payment Limit"
@@ -242,7 +245,10 @@ def _build_hcpcs_lookup(
             if hcpcs and payment:
                 # Handle N/A and other non-numeric values
                 try:
-                    asp_lookup[str(hcpcs).upper()] = float(payment)
+                    payment_limit = float(payment)
+                    # Back-calculate true ASP from Payment Limit
+                    true_asp = payment_limit / PAYMENT_LIMIT_MARKUP
+                    asp_lookup[str(hcpcs).upper()] = true_asp
                 except (ValueError, TypeError):
                     continue  # Skip non-numeric payment values
 
@@ -284,6 +290,9 @@ def _build_noc_lookup(
     lookup: dict[str, dict[str, object]] = {}
 
     # Build pricing lookup by generic drug name
+    # IMPORTANT: CMS Payment Limit already includes 6% markup (Payment Limit = ASP × 1.06)
+    # We must back-calculate the true ASP for correct margin calculations
+    PAYMENT_LIMIT_MARKUP = 1.06
     pricing_lookup: dict[str, float] = {}
     if "Drug Generic Name" in noc_pricing.columns and "Payment Limit" in noc_pricing.columns:
         for row in noc_pricing.iter_rows(named=True):
@@ -292,7 +301,10 @@ def _build_noc_lookup(
             if drug_name and payment:
                 try:
                     # Normalize name for matching
-                    pricing_lookup[str(drug_name).upper().strip()] = float(payment)
+                    # Back-calculate true ASP from Payment Limit
+                    payment_limit = float(payment)
+                    true_asp = payment_limit / PAYMENT_LIMIT_MARKUP
+                    pricing_lookup[str(drug_name).upper().strip()] = true_asp
                 except (ValueError, TypeError):
                     continue
 
