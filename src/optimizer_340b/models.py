@@ -51,6 +51,7 @@ class Drug:
     bill_units_per_package: int = 1
     therapeutic_class: str | None = None
     is_biologic: bool = False
+    is_brand: bool = True  # True=Brand (85% AWP), False=Generic (20% AWP)
     ira_flag: bool = False
     penny_pricing_flag: bool = False
     nadac_price: Decimal | None = None
@@ -90,27 +91,47 @@ class Drug:
 
 @dataclass
 class MarginAnalysis:
-    """Complete margin analysis for a drug.
+    """Complete margin analysis for a drug across 5 pathways.
+
+    Pathways:
+        1. Pharmacy - Medicaid: NADAC-based reimbursement
+        2. Pharmacy - Medicare/Commercial: AWP-based reimbursement
+        3. Medical - Medicaid: ASP * 1.04
+        4. Medical - Medicare: ASP * 1.06
+        5. Medical - Commercial: ASP * configurable %
 
     Attributes:
         drug: The analyzed drug entity.
-        retail_gross_margin: AWP * Reimb_Rate - Contract_Cost.
-        retail_net_margin: Gross margin * Capture_Rate.
-        retail_capture_rate: Assumed capture rate for retail channel.
-        medicare_margin: ASP * 1.06 * Bill_Units - Contract_Cost.
-        commercial_margin: ASP * 1.15 * Bill_Units - Contract_Cost.
+        pharmacy_medicaid_margin: NADAC + dispense fee + markup - contract cost.
+        pharmacy_medicare_commercial_margin: AWP * rate - contract cost.
+        medical_medicaid_margin: ASP * 1.04 * bill units - contract cost.
+        medical_medicare_margin: ASP * 1.06 * bill units - contract cost.
+        medical_commercial_margin: ASP * markup * bill units - contract cost.
+        retail_capture_rate: Assumed capture rate for pharmacy channels.
         recommended_path: Pathway with highest margin.
         margin_delta: Difference between best and second-best path.
+        # Legacy fields for backwards compatibility
+        retail_gross_margin: AWP * Reimb_Rate - Contract_Cost.
+        retail_net_margin: Gross margin * Capture_Rate.
+        medicare_margin: ASP * 1.06 * Bill_Units - Contract_Cost.
+        commercial_margin: ASP * 1.15 * Bill_Units - Contract_Cost.
     """
 
     drug: Drug
-    retail_gross_margin: Decimal
-    retail_net_margin: Decimal
-    retail_capture_rate: Decimal
-    medicare_margin: Decimal | None
-    commercial_margin: Decimal | None
-    recommended_path: RecommendedPath
-    margin_delta: Decimal
+    # New 5-pathway margins
+    pharmacy_medicaid_margin: Decimal | None = None
+    pharmacy_medicare_commercial_margin: Decimal | None = None
+    medical_medicaid_margin: Decimal | None = None
+    medical_medicare_margin: Decimal | None = None
+    medical_commercial_margin: Decimal | None = None
+    # Legacy fields (kept for backward compatibility)
+    retail_gross_margin: Decimal = Decimal("0")
+    retail_net_margin: Decimal = Decimal("0")
+    retail_capture_rate: Decimal = Decimal("1.0")
+    medicare_margin: Decimal | None = None
+    commercial_margin: Decimal | None = None
+    recommended_path: RecommendedPath = RecommendedPath.RETAIL
+    margin_delta: Decimal = Decimal("0")
 
     def to_display_dict(self) -> dict[str, object]:
         """Convert to dictionary for UI display.

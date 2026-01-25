@@ -9,14 +9,13 @@ import streamlit as st
 from optimizer_340b.compute.dosing import apply_loading_dose_logic
 from optimizer_340b.compute.margins import (
     analyze_drug_margin,
+    analyze_drug_margin_5pathway,
     calculate_margin_sensitivity,
 )
 from optimizer_340b.ingest.normalizers import normalize_ndc
 from optimizer_340b.models import Drug, MarginAnalysis
 from optimizer_340b.risk import check_ira_status
-from optimizer_340b.ui.components.capture_slider import render_payer_toggle
 from optimizer_340b.ui.components.drug_search import render_drug_search
-from optimizer_340b.ui.components.margin_card import render_margin_card
 from optimizer_340b.ui.components.risk_badge import render_risk_badges
 
 logger = logging.getLogger(__name__)
@@ -40,14 +39,6 @@ def render_drug_detail_page() -> None:
     if drug is None:
         return
 
-    # Default capture rate to 100% (feature temporarily disabled)
-    capture_rate = Decimal("1.0")
-
-    # Sidebar controls
-    with st.sidebar:
-        st.markdown("### Analysis Parameters")
-        render_payer_toggle(key="detail_payer")  # Renders toggle, value in session
-
     # Main content
     _render_drug_header(drug)
 
@@ -57,14 +48,76 @@ def render_drug_detail_page() -> None:
 
     st.markdown("---")
 
-    # Margin analysis
+    # Margin Analysis with 5 pathways
     st.markdown("### Margin Analysis")
-    analysis = analyze_drug_margin(drug, capture_rate)
-    render_margin_card(analysis)
+
+    # Configurable inputs in expander
+    with st.expander("Adjust Analysis Parameters", expanded=False):
+        param_col1, param_col2, param_col3 = st.columns(3)
+
+        with param_col1:
+            dispense_fee = st.number_input(
+                "Dispense Fee ($)",
+                min_value=0.0,
+                max_value=100.0,
+                value=0.0,
+                step=0.50,
+                help="Medicaid pharmacy dispense fee",
+                key="dispense_fee",
+            )
+            medicaid_markup = st.number_input(
+                "Medicaid Markup (%)",
+                min_value=0.0,
+                max_value=50.0,
+                value=0.0,
+                step=1.0,
+                help="Additional Medicaid pharmacy markup percentage",
+                key="medicaid_markup",
+            )
+
+        with param_col2:
+            commercial_asp_pct = st.number_input(
+                "Commercial ASP Markup (%)",
+                min_value=0.0,
+                max_value=50.0,
+                value=15.0,
+                step=1.0,
+                help="Commercial medical ASP markup (default 15%)",
+                key="commercial_asp_pct",
+            )
+
+        with param_col3:
+            capture_rate_pct = st.number_input(
+                "Capture Rate (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=100.0,
+                step=5.0,
+                help="Pharmacy channel capture rate",
+                key="capture_rate_pct",
+            )
+
+    # Convert inputs to Decimals
+    capture_rate = Decimal(str(capture_rate_pct)) / Decimal("100")
+    dispense_fee_dec = Decimal(str(dispense_fee))
+    medicaid_markup_dec = Decimal(str(medicaid_markup)) / Decimal("100")
+    commercial_asp_dec = Decimal(str(commercial_asp_pct)) / Decimal("100")
+
+    # Perform 5-pathway analysis
+    analysis = analyze_drug_margin_5pathway(
+        drug,
+        capture_rate=capture_rate,
+        dispense_fee=dispense_fee_dec,
+        medicaid_markup_pct=medicaid_markup_dec,
+        commercial_asp_pct=commercial_asp_dec,
+    )
+
+    # Display 5 margin cards
+    _render_5_margin_cards(drug, analysis, capture_rate)
 
     st.markdown("---")
 
-    # Sensitivity analysis
+    # Sensitivity analysis (uses legacy analysis for now)
     st.markdown("### Capture Rate Sensitivity")
     _render_sensitivity_chart(drug)
 
@@ -78,7 +131,14 @@ def render_drug_detail_page() -> None:
 
     # Provenance chain
     st.markdown("### Calculation Provenance")
-    _render_provenance_chain(drug, analysis)
+    _render_provenance_chain(
+        drug,
+        analysis,
+        capture_rate=capture_rate,
+        dispense_fee=dispense_fee_dec,
+        medicaid_markup_pct=medicaid_markup_dec,
+        commercial_asp_pct=commercial_asp_dec,
+    )
 
 
 def _get_or_search_drug() -> Drug | None:
@@ -200,6 +260,7 @@ def _search_drug(query: str) -> Drug | None:
 
 def _row_to_drug(row: dict[str, object]) -> Drug:
     """Convert catalog row to Drug object."""
+    from optimizer_340b.compute.retail_pricing import DrugCategory, classify_drug_category
     from optimizer_340b.risk.penny_pricing import build_nadac_lookup
     from optimizer_340b.ui.pages.dashboard import _build_hcpcs_lookup
 
@@ -240,6 +301,10 @@ def _row_to_drug(row: dict[str, object]) -> Drug:
     # Get NADAC price (most recent)
     nadac_price = nadac_info.get("nadac_price")
 
+    # Classify drug as Brand/Specialty (is_brand=True) or Generic (is_brand=False)
+    drug_category = classify_drug_category(str(drug_name))
+    is_brand = drug_category != DrugCategory.GENERIC
+
     return Drug(
         ndc=ndc,
         drug_name=str(drug_name),
@@ -249,6 +314,7 @@ def _row_to_drug(row: dict[str, object]) -> Drug:
         asp=Decimal(str(hcpcs_info.get("asp"))) if hcpcs_info.get("asp") else None,
         hcpcs_code=str(hcpcs_code) if hcpcs_code else None,
         bill_units_per_package=int(str(bill_units)) if bill_units else 1,
+        is_brand=is_brand,
         ira_flag=bool(ira_status.get("is_ira_drug", False)),
         penny_pricing_flag=bool(nadac_info.get("is_penny_priced", False)),
         nadac_price=nadac_price,
@@ -307,6 +373,18 @@ def _render_drug_header(drug: Drug) -> None:
 
     with col2:
         st.markdown("**Quick Reference**")
+
+        # Brand/Generic indicator
+        drug_type = "Brand" if drug.is_brand else "Generic"
+        type_color = "#007bff" if drug.is_brand else "#28a745"
+        st.markdown(
+            f"<span style='background-color: {type_color}; color: white; "
+            f"padding: 2px 8px; border-radius: 4px; font-weight: bold;'>"
+            f"{drug_type}</span>",
+            unsafe_allow_html=True,
+        )
+        st.caption(f"AWP Rate: {'85%' if drug.is_brand else '20%'}")
+
         st.metric("Contract Cost", f"${drug.contract_cost:,.2f}")
         st.metric("AWP", f"${drug.awp:,.2f}")
 
@@ -366,6 +444,146 @@ def _render_drug_header(drug: Drug) -> None:
             st.markdown("**Payment Limit**")
             st.markdown("N/A")
             st.caption("No HCPCS mapping")
+
+
+def _render_5_margin_cards(
+    drug: Drug,
+    analysis: MarginAnalysis,
+    capture_rate: Decimal,
+) -> None:
+    """Render 5 margin pathway cards.
+
+    Pathways:
+        1. Pharmacy - Medicaid (NADAC-based)
+        2. Pharmacy - Medicare/Commercial (AWP-based)
+        3. Medical - Medicaid (ASP × 1.04)
+        4. Medical - Medicare (ASP × 1.06)
+        5. Medical - Commercial (ASP × configurable)
+    """
+    # Find the best margin for highlighting
+    margins = [
+        ("pharmacy_medicaid", analysis.pharmacy_medicaid_margin),
+        ("pharmacy_medicare_commercial", analysis.pharmacy_medicare_commercial_margin),
+        ("medical_medicaid", analysis.medical_medicaid_margin),
+        ("medical_medicare", analysis.medical_medicare_margin),
+        ("medical_commercial", analysis.medical_commercial_margin),
+    ]
+    valid_margins = [(name, m) for name, m in margins if m is not None]
+    best_pathway = max(valid_margins, key=lambda x: x[1])[0] if valid_margins else None
+
+    # Row 1: Pharmacy pathways
+    st.markdown("#### Pharmacy Pathways")
+    pharm_col1, pharm_col2 = st.columns(2)
+
+    with pharm_col1:
+        is_best = best_pathway == "pharmacy_medicaid"
+        _render_margin_card_single(
+            title="Pharmacy - Medicaid",
+            margin=analysis.pharmacy_medicaid_margin,
+            formula="(NADAC + Dispense Fee) × (1 + Markup%) × Capture Rate - Contract Cost",
+            is_best=is_best,
+            na_reason="No NADAC price available" if drug.nadac_price is None else None,
+        )
+
+    with pharm_col2:
+        is_best = best_pathway == "pharmacy_medicare_commercial"
+        awp_rate = "85%" if drug.is_brand else "20%"
+        _render_margin_card_single(
+            title="Pharmacy - Medicare/Commercial",
+            margin=analysis.pharmacy_medicare_commercial_margin,
+            formula=f"AWP × {awp_rate} ({'Brand' if drug.is_brand else 'Generic'}) × Capture Rate - Contract Cost",
+            is_best=is_best,
+        )
+
+    # Row 2: Medical pathways
+    st.markdown("#### Medical Pathways")
+    med_col1, med_col2, med_col3 = st.columns(3)
+
+    with med_col1:
+        is_best = best_pathway == "medical_medicaid"
+        _render_margin_card_single(
+            title="Medical - Medicaid",
+            margin=analysis.medical_medicaid_margin,
+            formula="ASP × 1.04 × Bill Units - Contract Cost",
+            is_best=is_best,
+            na_reason="No ASP/HCPCS mapping" if not drug.has_medical_path() else None,
+        )
+
+    with med_col2:
+        is_best = best_pathway == "medical_medicare"
+        _render_margin_card_single(
+            title="Medical - Medicare",
+            margin=analysis.medical_medicare_margin,
+            formula="ASP × 1.06 × Bill Units - Contract Cost",
+            is_best=is_best,
+            na_reason="No ASP/HCPCS mapping" if not drug.has_medical_path() else None,
+        )
+
+    with med_col3:
+        is_best = best_pathway == "medical_commercial"
+        _render_margin_card_single(
+            title="Medical - Commercial",
+            margin=analysis.medical_commercial_margin,
+            formula="ASP × (1 + Markup%) × Bill Units - Contract Cost",
+            is_best=is_best,
+            na_reason="No ASP/HCPCS mapping" if not drug.has_medical_path() else None,
+        )
+
+    # Summary
+    if best_pathway and valid_margins:
+        best_margin = max(m for _, m in valid_margins)
+        pathway_names = {
+            "pharmacy_medicaid": "Pharmacy - Medicaid",
+            "pharmacy_medicare_commercial": "Pharmacy - Medicare/Commercial",
+            "medical_medicaid": "Medical - Medicaid",
+            "medical_medicare": "Medical - Medicare",
+            "medical_commercial": "Medical - Commercial",
+        }
+        st.success(
+            f"**Recommended:** {pathway_names.get(best_pathway, best_pathway)} "
+            f"with margin of **${best_margin:,.2f}**"
+        )
+
+
+def _render_margin_card_single(
+    title: str,
+    margin: Decimal | None,
+    formula: str,
+    is_best: bool = False,
+    na_reason: str | None = None,
+) -> None:
+    """Render a single margin card."""
+    if margin is not None:
+        # Determine color based on margin value
+        if margin > 0:
+            color = "green" if is_best else "blue"
+        else:
+            color = "red"
+
+        border = "3px solid #28a745" if is_best else "1px solid #ddd"
+        badge = " ⭐ BEST" if is_best else ""
+
+        st.markdown(
+            f"""
+            <div style="border: {border}; border-radius: 8px; padding: 1rem; margin-bottom: 0.5rem;">
+                <h5 style="margin: 0;">{title}{badge}</h5>
+                <h3 style="color: {color}; margin: 0.5rem 0;">${margin:,.2f}</h3>
+                <small style="color: #666;">{formula}</small>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"""
+            <div style="border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 0.5rem; opacity: 0.6;">
+                <h5 style="margin: 0;">{title}</h5>
+                <h3 style="color: #999; margin: 0.5rem 0;">N/A</h3>
+                <small style="color: #999;">{na_reason or "Not available"}</small>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def _render_sensitivity_chart(drug: Drug) -> None:
@@ -524,91 +742,163 @@ def _render_loading_dose_analysis(drug: Drug, analysis: MarginAnalysis) -> None:
         )
 
 
-def _render_provenance_chain(drug: Drug, analysis: MarginAnalysis) -> None:
-    """Render calculation provenance for auditability."""
+def _render_provenance_chain(
+    drug: Drug,
+    analysis: MarginAnalysis,
+    capture_rate: Decimal = Decimal("1.0"),
+    dispense_fee: Decimal = Decimal("0"),
+    medicaid_markup_pct: Decimal = Decimal("0"),
+    commercial_asp_pct: Decimal = Decimal("0.15"),
+) -> None:
+    """Render calculation provenance for all 5 pathways."""
     st.markdown(
         "Every calculated margin has a complete audit trail. "
         "Click to expand each calculation."
     )
 
-    with st.expander("Retail Margin Calculation"):
-        revenue = drug.awp * Decimal("0.85")
+    # 1. Pharmacy - Medicaid
+    with st.expander("1. Pharmacy - Medicaid"):
+        if drug.nadac_price is not None:
+            base = drug.nadac_price + dispense_fee
+            revenue = base * (Decimal("1") + medicaid_markup_pct)
+            margin = (revenue * capture_rate) - drug.contract_cost
+            st.markdown(f"""
+            **Formula:** (NADAC + Dispense Fee) × (1 + Markup%) × Capture Rate - Contract Cost
+
+            **Inputs:**
+            - NADAC: ${drug.nadac_price:,.2f}
+            - Dispense Fee: ${dispense_fee:,.2f}
+            - Markup: {medicaid_markup_pct:.0%}
+            - Capture Rate: {capture_rate:.0%}
+            - Contract Cost: ${drug.contract_cost:,.2f}
+
+            **Calculation:**
+            1. Base = ${drug.nadac_price:,.2f} + ${dispense_fee:,.2f} = ${base:,.2f}
+            2. Revenue = ${base:,.2f} × (1 + {medicaid_markup_pct:.0%}) = ${revenue:,.2f}
+            3. Adjusted Revenue = ${revenue:,.2f} × {capture_rate:.0%} = ${revenue * capture_rate:,.2f}
+            4. Margin = ${revenue * capture_rate:,.2f} - ${drug.contract_cost:,.2f} = ${margin:,.2f}
+
+            **Result:** ${margin:,.2f}
+            """)
+        else:
+            st.warning("NADAC price not available for this drug.")
+
+    # 2. Pharmacy - Medicare/Commercial
+    with st.expander("2. Pharmacy - Medicare/Commercial"):
+        awp_factor = Decimal("0.85") if drug.is_brand else Decimal("0.20")
+        factor_label = "85% (Brand)" if drug.is_brand else "20% (Generic)"
+        revenue = drug.awp * awp_factor
+        margin = (revenue * capture_rate) - drug.contract_cost
         st.markdown(f"""
-        **Formula:** AWP × 85% × Capture Rate - Contract Cost
+        **Formula:** AWP × {factor_label} × Capture Rate - Contract Cost
 
         **Inputs:**
         - AWP: ${drug.awp:,.2f}
+        - AWP Factor: {factor_label}
+        - Capture Rate: {capture_rate:.0%}
         - Contract Cost: ${drug.contract_cost:,.2f}
-        - Capture Rate: {analysis.retail_capture_rate:.0%}
 
         **Calculation:**
-        1. Revenue = ${drug.awp:,.2f} × 0.85 = ${revenue:,.2f}
-        2. Gross Margin = ${revenue:,.2f} - ${drug.contract_cost:,.2f}
-           = ${analysis.retail_gross_margin:,.2f}
-        3. Net Margin = ${analysis.retail_gross_margin:,.2f}
-           × {analysis.retail_capture_rate:.0%} = ${analysis.retail_net_margin:,.2f}
+        1. Revenue = ${drug.awp:,.2f} × {awp_factor} = ${revenue:,.2f}
+        2. Adjusted Revenue = ${revenue:,.2f} × {capture_rate:.0%} = ${revenue * capture_rate:,.2f}
+        3. Margin = ${revenue * capture_rate:,.2f} - ${drug.contract_cost:,.2f} = ${margin:,.2f}
 
-        **Result:** ${analysis.retail_net_margin:,.2f}
+        **Result:** ${margin:,.2f}
         """)
 
-    if analysis.medicare_margin is not None and drug.asp is not None:
-        with st.expander("Medicare Margin Calculation"):
-            med_rev = drug.asp * Decimal("1.06") * drug.bill_units_per_package
+    # 3. Medical - Medicaid
+    with st.expander("3. Medical - Medicaid"):
+        if drug.has_medical_path() and drug.asp is not None:
+            revenue = drug.asp * Decimal("1.04") * drug.bill_units_per_package
+            margin = revenue - drug.contract_cost
+            st.markdown(f"""
+            **Formula:** ASP × 1.04 × Bill Units - Contract Cost
+
+            **Inputs:**
+            - ASP: ${drug.asp:,.2f}
+            - Multiplier: 1.04 (ASP + 4%)
+            - Bill Units per Package: {drug.bill_units_per_package}
+            - Contract Cost: ${drug.contract_cost:,.2f}
+
+            **Calculation:**
+            1. Revenue = ${drug.asp:,.2f} × 1.04 × {drug.bill_units_per_package} = ${revenue:,.2f}
+            2. Margin = ${revenue:,.2f} - ${drug.contract_cost:,.2f} = ${margin:,.2f}
+
+            **Result:** ${margin:,.2f}
+            """)
+        else:
+            st.warning("No ASP/HCPCS mapping available for medical billing.")
+
+    # 4. Medical - Medicare
+    with st.expander("4. Medical - Medicare"):
+        if drug.has_medical_path() and drug.asp is not None:
+            revenue = drug.asp * Decimal("1.06") * drug.bill_units_per_package
+            margin = revenue - drug.contract_cost
             st.markdown(f"""
             **Formula:** ASP × 1.06 × Bill Units - Contract Cost
 
             **Inputs:**
             - ASP: ${drug.asp:,.2f}
+            - Multiplier: 1.06 (ASP + 6%)
             - Bill Units per Package: {drug.bill_units_per_package}
             - Contract Cost: ${drug.contract_cost:,.2f}
 
             **Calculation:**
-            1. Revenue = ${drug.asp:,.2f} × 1.06 × {drug.bill_units_per_package}
-               = ${med_rev:,.2f}
-            2. Margin = ${med_rev:,.2f} - ${drug.contract_cost:,.2f}
-               = ${analysis.medicare_margin:,.2f}
+            1. Revenue = ${drug.asp:,.2f} × 1.06 × {drug.bill_units_per_package} = ${revenue:,.2f}
+            2. Margin = ${revenue:,.2f} - ${drug.contract_cost:,.2f} = ${margin:,.2f}
 
-            **Result:** ${analysis.medicare_margin:,.2f}
+            **Result:** ${margin:,.2f}
             """)
+        else:
+            st.warning("No ASP/HCPCS mapping available for medical billing.")
 
-    if analysis.commercial_margin is not None and drug.asp is not None:
-        with st.expander("Commercial Margin Calculation"):
-            comm_rev = drug.asp * Decimal("1.15") * drug.bill_units_per_package
+    # 5. Medical - Commercial
+    with st.expander("5. Medical - Commercial"):
+        if drug.has_medical_path() and drug.asp is not None:
+            multiplier = Decimal("1") + commercial_asp_pct
+            revenue = drug.asp * multiplier * drug.bill_units_per_package
+            margin = revenue - drug.contract_cost
             st.markdown(f"""
-            **Formula:** ASP × 1.15 × Bill Units - Contract Cost
+            **Formula:** ASP × (1 + Markup%) × Bill Units - Contract Cost
 
             **Inputs:**
             - ASP: ${drug.asp:,.2f}
+            - Markup: {commercial_asp_pct:.0%} (Multiplier: {multiplier})
             - Bill Units per Package: {drug.bill_units_per_package}
             - Contract Cost: ${drug.contract_cost:,.2f}
 
             **Calculation:**
-            1. Revenue = ${drug.asp:,.2f} × 1.15 × {drug.bill_units_per_package}
-               = ${comm_rev:,.2f}
-            2. Margin = ${comm_rev:,.2f} - ${drug.contract_cost:,.2f}
-               = ${analysis.commercial_margin:,.2f}
+            1. Revenue = ${drug.asp:,.2f} × {multiplier} × {drug.bill_units_per_package} = ${revenue:,.2f}
+            2. Margin = ${revenue:,.2f} - ${drug.contract_cost:,.2f} = ${margin:,.2f}
 
-            **Result:** ${analysis.commercial_margin:,.2f}
+            **Result:** ${margin:,.2f}
             """)
+        else:
+            st.warning("No ASP/HCPCS mapping available for medical billing.")
 
-    with st.expander("Recommendation Logic"):
-        med_display = (
-            f"${analysis.medicare_margin:,.2f}"
-            if analysis.medicare_margin else "N/A"
-        )
-        comm_display = (
-            f"${analysis.commercial_margin:,.2f}"
-            if analysis.commercial_margin else "N/A"
-        )
-        path_name = analysis.recommended_path.value.replace("_", " ")
-        st.markdown(f"""
-        **Available Pathways:**
-        - Retail: ${analysis.retail_net_margin:,.2f}
-        - Medicare: {med_display}
-        - Commercial: {comm_display}
+    # Recommendation Summary
+    with st.expander("Recommendation Logic", expanded=True):
+        margins = [
+            ("Pharmacy - Medicaid", analysis.pharmacy_medicaid_margin),
+            ("Pharmacy - Medicare/Commercial", analysis.pharmacy_medicare_commercial_margin),
+            ("Medical - Medicaid", analysis.medical_medicaid_margin),
+            ("Medical - Medicare", analysis.medical_medicare_margin),
+            ("Medical - Commercial", analysis.medical_commercial_margin),
+        ]
 
-        **Selection:** Highest margin pathway selected.
+        st.markdown("**All Pathway Margins:**")
+        for name, margin in margins:
+            if margin is not None:
+                color = "green" if margin > 0 else "red"
+                st.markdown(f"- {name}: <span style='color:{color}'>${margin:,.2f}</span>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"- {name}: N/A")
 
-        **Result:** {path_name}
-        (${analysis.margin_delta:,.2f} better than next best option)
-        """)
+        valid_margins = [(name, m) for name, m in margins if m is not None]
+        if valid_margins:
+            best_name, best_margin = max(valid_margins, key=lambda x: x[1])
+            st.markdown(f"""
+            **Selection:** Highest margin pathway selected.
+
+            **Recommended:** {best_name} with margin of **${best_margin:,.2f}**
+            """)

@@ -438,6 +438,8 @@ def _row_to_drug(
 
     # Classify drug category (for retail pricing multiplier)
     drug_category = classify_drug_category(str(drug_name), category_lookup)
+    # Brand/Specialty use 85% AWP, Generic uses 20% AWP
+    is_brand = drug_category != DrugCategory.GENERIC
 
     return Drug(
         ndc=ndc,
@@ -448,6 +450,7 @@ def _row_to_drug(
         asp=Decimal(str(asp)) if asp else None,
         hcpcs_code=str(hcpcs_code) if hcpcs_code else None,
         bill_units_per_package=int(str(bill_units)) if bill_units else 1,
+        is_brand=is_brand,
         ira_flag=bool(ira_flag),
         penny_pricing_flag=bool(penny_pricing),
         nadac_price=nadac_price,

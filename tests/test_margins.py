@@ -40,8 +40,8 @@ class TestConstants:
         assert Decimal("1.15") == COMMERCIAL_ASP_MULTIPLIER
 
     def test_default_capture_rate(self) -> None:
-        """Default capture rate should be 45%."""
-        assert Decimal("0.45") == DEFAULT_CAPTURE_RATE
+        """Default capture rate should be 100%."""
+        assert Decimal("1.0") == DEFAULT_CAPTURE_RATE
 
 
 class TestRetailMargin:
@@ -53,7 +53,7 @@ class TestRetailMargin:
         HUMIRA test data:
         AWP: $6500, Contract: $150
         Gross = $6500 × 0.85 - $150 = $5375
-        Net = $5375 × 0.45 = $2418.75
+        Net = $5375 × 1.0 = $5375 (at default 100% capture rate)
         """
         gross, net = calculate_retail_margin(sample_drug)
 
@@ -61,9 +61,10 @@ class TestRetailMargin:
         assert gross == expected_gross
         assert gross == Decimal("5375.00")
 
-        expected_net = expected_gross * Decimal("0.45")
+        # Default capture rate is now 100%
+        expected_net = expected_gross * Decimal("1.0")
         assert net == expected_net
-        assert net == Decimal("2418.75")
+        assert net == Decimal("5375.00")
 
     def test_retail_margin_custom_capture_rate(self, sample_drug: Drug) -> None:
         """Retail margin should scale with capture rate."""
@@ -239,9 +240,9 @@ class TestAnalyzeDrugMargin:
         """Should calculate all margins and provide recommendation."""
         analysis = analyze_drug_margin(sample_drug)
 
-        # Verify all margins calculated
+        # Verify all margins calculated (default capture rate is now 100%)
         assert analysis.retail_gross_margin == Decimal("5375.00")
-        assert analysis.retail_net_margin == Decimal("2418.75")
+        assert analysis.retail_net_margin == Decimal("5375.00")  # 100% capture rate
         assert analysis.medicare_margin == Decimal("5786.00")
         assert analysis.commercial_margin == Decimal("6290.00")
 
