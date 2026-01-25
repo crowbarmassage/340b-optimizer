@@ -14,10 +14,8 @@ from optimizer_340b.compute.margins import (
 from optimizer_340b.ingest.normalizers import normalize_ndc
 from optimizer_340b.models import Drug, MarginAnalysis
 from optimizer_340b.risk import check_ira_status
-from optimizer_340b.ui.components.capture_slider import (
-    render_capture_slider,
-    render_payer_toggle,
-)
+from optimizer_340b.ui.components.capture_slider import render_payer_toggle
+from optimizer_340b.ui.components.drug_search import render_drug_search
 from optimizer_340b.ui.components.margin_card import render_margin_card
 from optimizer_340b.ui.components.risk_badge import render_risk_badges
 
@@ -42,10 +40,12 @@ def render_drug_detail_page() -> None:
     if drug is None:
         return
 
+    # Default capture rate to 100% (feature temporarily disabled)
+    capture_rate = Decimal("1.0")
+
     # Sidebar controls
     with st.sidebar:
         st.markdown("### Analysis Parameters")
-        capture_rate = render_capture_slider(key="detail_capture")
         render_payer_toggle(key="detail_payer")  # Renders toggle, value in session
 
     # Main content
@@ -96,37 +96,31 @@ def _get_or_search_drug() -> Drug | None:
                     f"Currently viewing: **{drug.drug_name}** ({drug.ndc_formatted})"
                 )
             with col2:
-                if st.button("🔍 Search New Drug", type="secondary"):
+                if st.button("Search New Drug", type="secondary"):
                     st.session_state.selected_drug = None
                     st.rerun()
             return drug
 
-    # Show search interface
-    st.markdown("Search for a drug to analyze:")
+    # Show enhanced search interface
+    st.markdown("### Search for a Drug")
+    st.caption("Search by drug name, 11-digit NDC, or HCPCS code (e.g., J0135)")
 
-    col1, col2 = st.columns([3, 1])
+    # Use enhanced search component (supports Enter key via form)
+    # Component handles multiple matches internally and returns selected NDC
+    search_result = render_drug_search(key_prefix="detail")
 
-    with col1:
-        search = st.text_input(
-            "Drug name or NDC",
-            placeholder="Enter drug name or NDC...",
-            key="drug_detail_search",
-        )
-
-    with col2:
-        search_btn = st.button("Search", type="primary")
-
-    if search and search_btn:
-        drug = _search_drug(search)
+    if search_result:
+        # search_result is always an NDC (component handles name/HCPCS selection)
+        drug = _lookup_drug_by_ndc(search_result)
         if drug:
             st.session_state.selected_drug = drug.ndc
             st.rerun()
         else:
-            st.error("Drug not found. Please check the name or NDC.")
+            st.error(f"No drug found with NDC '{search_result}'.")
 
     # Demo mode - search for actual drugs in uploaded data
     st.markdown("---")
-    st.info("Or try a demo drug:")
+    st.markdown("**Quick Demo:**")
 
     col1, col2 = st.columns(2)
 

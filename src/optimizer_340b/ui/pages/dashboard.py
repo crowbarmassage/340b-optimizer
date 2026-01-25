@@ -24,7 +24,7 @@ from optimizer_340b.risk.retail_validation import (
     build_retail_validation_lookup,
     load_wholesaler_catalog,
 )
-from optimizer_340b.ui.components.capture_slider import render_capture_slider
+from optimizer_340b.ui.components.drug_search import render_drug_search
 
 logger = logging.getLogger(__name__)
 
@@ -53,21 +53,19 @@ def render_dashboard_page() -> None:
 
     st.markdown("---")
 
-    # Controls in main panel (capture rate affects delta calculations)
-    st.markdown("### Analysis Controls")
+    # Controls in main panel
+    st.markdown("### Filters")
 
-    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 1, 1])
+    # Default capture rate to 100% (feature temporarily disabled)
+    capture_rate = Decimal("1.0")
+
+    ctrl_col1, ctrl_col2 = st.columns(2)
 
     with ctrl_col1:
-        capture_rate = render_capture_slider(key="dashboard_capture")
-
-    with ctrl_col2:
-        st.markdown("**Filters**")
         show_ira_only = st.checkbox("Show IRA drugs only", value=False)
         hide_penny = st.checkbox("Hide penny pricing drugs", value=False)
 
-    with ctrl_col3:
-        st.markdown("&nbsp;")  # Spacer for alignment
+    with ctrl_col2:
         min_delta = st.number_input(
             "Min margin delta ($)",
             min_value=0,
@@ -78,12 +76,22 @@ def render_dashboard_page() -> None:
 
     st.markdown("---")
 
-    # Search
-    search_query = st.text_input(
-        "Search drugs",
-        placeholder="Enter drug name or NDC...",
-        key="drug_search",
-    )
+    # Enhanced search with HCPCS support
+    st.markdown("### Search")
+    search_result = render_drug_search(key_prefix="dashboard")
+
+    # Parse search result for filtering
+    # - "name:query" = filter by drug name (partial match)
+    # - "hcpcs:code" = filter by HCPCS code
+    # - NDC string = filter by NDC
+    search_query = ""
+    if search_result:
+        if search_result.startswith("name:"):
+            search_query = search_result[5:]  # Drug name search
+        elif search_result.startswith("hcpcs:"):
+            search_query = search_result[6:]  # HCPCS code search
+        else:
+            search_query = search_result  # NDC search
 
     # Get and display opportunities
     opportunities = _calculate_opportunities(capture_rate)
@@ -457,7 +465,7 @@ def _apply_filters(
 
     Args:
         analyses: List of MarginAnalysis objects.
-        search_query: Drug name or NDC search.
+        search_query: Drug name, NDC, or HCPCS code search.
         show_ira_only: Show only IRA-affected drugs.
         hide_penny: Hide penny-priced drugs.
         min_delta: Minimum margin delta.
@@ -467,7 +475,7 @@ def _apply_filters(
     """
     filtered = analyses
 
-    # Search filter - supports drug name or NDC (11-digit or 5-4-2 format)
+    # Search filter - supports drug name, NDC (11-digit or 5-4-2 format), or HCPCS code
     if search_query:
         query = search_query.upper()
         query_ndc = normalize_ndc(search_query)  # Normalize for NDC matching
@@ -476,6 +484,7 @@ def _apply_filters(
             if query in a.drug.drug_name.upper()
             or query_ndc in a.drug.ndc
             or query in a.drug.ndc  # Also check raw query for partial matches
+            or (a.drug.hcpcs_code and query == a.drug.hcpcs_code.upper())  # HCPCS match
         ]
 
     # IRA filter
@@ -514,7 +523,7 @@ def _apply_filters_with_context(
 
     filtered = analyses
 
-    # Search filter - supports drug name or NDC (11-digit or 5-4-2 format)
+    # Search filter - supports drug name, NDC (11-digit or 5-4-2 format), or HCPCS code
     if search_query:
         query = search_query.upper()
         query_ndc = normalize_ndc(search_query)  # Normalize for NDC matching
@@ -523,6 +532,7 @@ def _apply_filters_with_context(
             if query in a.drug.drug_name.upper()
             or query_ndc in a.drug.ndc
             or query in a.drug.ndc  # Also check raw query for partial matches
+            or (a.drug.hcpcs_code and query == a.drug.hcpcs_code.upper())  # HCPCS match
         ]
         context["search_matches"] = len(search_results)
         filtered = search_results
