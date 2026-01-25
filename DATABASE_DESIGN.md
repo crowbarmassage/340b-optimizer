@@ -625,6 +625,63 @@ KRYSTEXXA shows the **most extreme price variance** for the same NDC:
 
 **Same NDC, price difference of $31,788.24** - this is the "penny pricing" pattern for orphan drugs through the SPD PHS contract.
 
+#### Example 4: WILATE (Variable Potency Biologics)
+
+WILATE (von Willebrand Factor) demonstrates why **NDC + Contract** still has duplicates:
+
+| NDC | Description | Contract | Cost |
+|-----|-------------|----------|------|
+| 68982018202 | WILATE PR VWF **0930U** W/DIL1030 SPD | SPD PHS | $669.60 |
+| 68982018202 | WILATE PR VWF **0980U** W/DIL1100 SPD | SPD PHS | $705.60 |
+| 68982018202 | WILATE PR VWF **1030U** W/DIL1050 SPD | SPD PHS | $741.60 |
+| 68982018202 | WILATE PR VWF **1040U** W/DIL0960 SPD | SPD PHS | $748.80 |
+| 68982018202 | WILATE PR VWF **1090U** W/DIL1050 SPD | SPD PHS | $784.80 |
+
+**Same NDC, same contract, 72 different rows** - each vial has batch-specific potency (0930U, 0980U, 1030U = units of VWF). This is normal for plasma-derived biologics where potency varies batch-to-batch. The description captures the actual units per vial.
+
+### Composite Key Analysis
+
+| Composite Key | Unique | Duplicates | Coverage |
+|---------------|--------|------------|----------|
+| NDC | 30,212 | 4,017 | 88.26% |
+| NDC + Contract | 30,316 | 3,913 | **88.57%** |
+| NDC + Contract + Cost | 33,636 | 593 | 98.27% |
+| NDC + Description | 34,202 | 27 | 99.92% |
+| NDC + Contract + Description | 34,213 | 16 | **99.95%** |
+
+**Key Insight:** `NDC + Contract` barely improves uniqueness (88.57% vs 88.26%) because variable-potency biologics like WILATE have the same NDC and contract but different descriptions.
+
+### The Final 16 Duplicates
+
+Even at `NDC + Contract + Description`, 16 combinations have duplicates with **different prices**:
+
+```
+MEKINIST TB 0.5MG 30 SPD (NDC 78110515, SPD PHS):
+  - Row 1: $1,843.26
+  - Row 2: $1,817.52
+```
+
+These likely represent **price changes over time** for the same product/contract combination.
+
+### Recommended Two-Tier Approach
+
+| Layer | Key Strategy | Coverage | Use Case |
+|-------|--------------|----------|----------|
+| **Bronze/Silver** | Surrogate + `(NDC, Contract, Description, Cost)` | 100% | Full data retention |
+| **Gold** | NDC (deduplicated) with price aggregates | 88.26% | Dashboard, margin analysis |
+
+For the Gold layer, aggregate prices per NDC:
+```sql
+SELECT
+    ndc,
+    MIN(contract_cost) AS best_price,
+    MAX(contract_cost) AS worst_price,
+    AVG(contract_cost) AS avg_price,
+    COUNT(DISTINCT contract_name) AS contract_count
+FROM contract_pricing
+GROUP BY ndc;
+```
+
 ### Primary Key Strategies
 
 #### Option 1: Surrogate Key (Recommended)
@@ -763,3 +820,4 @@ CREATE TABLE contract_pricing (
 |---------|------|--------|---------|
 | 1.0 | 2025-01-25 | Claude | Initial design based on current Streamlit app data sources |
 | 1.1 | 2025-01-25 | Claude | Added Primary Key & Uniqueness section with HUMIRA, ACTEMRA, KRYSTEXXA examples |
+| 1.2 | 2025-01-25 | Claude | Added composite key analysis, WILATE variable potency example, two-tier approach |
