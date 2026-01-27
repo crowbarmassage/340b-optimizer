@@ -58,6 +58,61 @@ def render_ndc_lookup_page() -> None:
 
     st.markdown("---")
 
+    # Configurable parameters in expander
+    st.markdown("### Margin Analysis Parameters")
+    with st.expander("Adjust Analysis Parameters", expanded=False):
+        param_col1, param_col2, param_col3 = st.columns(3)
+
+        with param_col1:
+            dispense_fee = st.number_input(
+                "Dispense Fee ($)",
+                min_value=0.0,
+                max_value=100.0,
+                value=0.0,
+                step=0.50,
+                help="Medicaid pharmacy dispense fee added to NADAC",
+                key="ndc_dispense_fee",
+            )
+            medicaid_markup = st.number_input(
+                "Medicaid Markup (%)",
+                min_value=0.0,
+                max_value=50.0,
+                value=0.0,
+                step=1.0,
+                help="Additional Medicaid pharmacy markup percentage",
+                key="ndc_medicaid_markup",
+            )
+
+        with param_col2:
+            awp_discount = st.number_input(
+                "AWP Discount (%)",
+                min_value=0.0,
+                max_value=50.0,
+                value=15.0,
+                step=1.0,
+                help="AWP discount for Medicare/Commercial (default 15% = AWP × 0.85)",
+                key="ndc_awp_discount",
+            )
+
+        with param_col3:
+            capture_rate_pct = st.number_input(
+                "Capture Rate (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=100.0,
+                step=5.0,
+                help="Pharmacy channel capture rate",
+                key="ndc_capture_rate",
+            )
+
+    # Convert to Decimals for calculations
+    dispense_fee_dec = Decimal(str(dispense_fee))
+    medicaid_markup_dec = Decimal(str(medicaid_markup)) / Decimal("100")
+    awp_discount_dec = Decimal(str(awp_discount)) / Decimal("100")
+    capture_rate_dec = Decimal(str(capture_rate_pct)) / Decimal("100")
+
+    st.markdown("---")
+
     # File format instructions
     with st.expander("CSV Format Requirements", expanded=False):
         st.markdown(
@@ -102,7 +157,15 @@ def render_ndc_lookup_page() -> None:
             # Process button
             if st.button("Calculate Margins", type="primary"):
                 with st.spinner("Processing NDC lookups..."):
-                    results_df = _process_ndc_lookup(input_df, catalog, nadac)
+                    results_df = _process_ndc_lookup(
+                        input_df,
+                        catalog,
+                        nadac,
+                        dispense_fee=dispense_fee_dec,
+                        medicaid_markup=medicaid_markup_dec,
+                        awp_discount=awp_discount_dec,
+                        capture_rate=capture_rate_dec,
+                    )
 
                 if results_df is not None and len(results_df) > 0:
                     st.markdown("---")
@@ -300,6 +363,10 @@ def _process_ndc_lookup(
     input_df: pd.DataFrame,
     catalog: pl.DataFrame,
     nadac: pl.DataFrame | None = None,
+    dispense_fee: Decimal = Decimal("0"),
+    medicaid_markup: Decimal = Decimal("0"),
+    awp_discount: Decimal = Decimal("0.15"),
+    capture_rate: Decimal = Decimal("1"),
 ) -> pd.DataFrame:
     """Process NDC lookup and calculate margins.
 
@@ -307,6 +374,10 @@ def _process_ndc_lookup(
         input_df: Input DataFrame with drug list.
         catalog: Product catalog DataFrame.
         nadac: Optional NADAC pricing DataFrame.
+        dispense_fee: Dispense fee to add to NADAC (default $0).
+        medicaid_markup: Medicaid markup percentage as decimal (default 0).
+        awp_discount: AWP discount percentage as decimal (default 0.15 = 15%).
+        capture_rate: Capture rate as decimal (default 1.0 = 100%).
 
     Returns:
         Results DataFrame with match status and margins.
@@ -356,7 +427,15 @@ def _process_ndc_lookup(
             # Calculate margins if we have pricing
             # Note: NADAC is per-unit, so multiply by package_size for per-package comparison
             medicaid_margin, medicare_commercial_margin = _calculate_pharmacy_margins(
-                contract_cost, awp, nadac_price, drug_type, package_size
+                contract_cost=contract_cost,
+                awp=awp,
+                nadac_price=nadac_price,
+                drug_type=drug_type,
+                package_size=package_size,
+                dispense_fee=dispense_fee,
+                medicaid_markup=medicaid_markup,
+                awp_discount=awp_discount,
+                capture_rate=capture_rate,
             )
         else:
             catalog_name = ""
@@ -547,11 +626,15 @@ def _calculate_pharmacy_margins(
     nadac_price: Decimal | None,
     drug_type: str,
     package_size: Decimal = Decimal("1"),
+    dispense_fee: Decimal = Decimal("0"),
+    medicaid_markup: Decimal = Decimal("0"),
+    awp_discount: Decimal = Decimal("0.15"),
+    capture_rate: Decimal = Decimal("1"),
 ) -> tuple[Decimal | None, Decimal | None]:
     """Calculate pharmacy channel margins.
 
-    Pharmacy Medicaid: (NADAC × Package Size) - Contract Cost
-    Pharmacy Medicare/Commercial: AWP × Rate - Contract Cost
+    Pharmacy Medicaid: ((NADAC × Pkg Size) + Dispense Fee) × (1 + Markup%) × Capture Rate - Contract Cost
+    Pharmacy Medicare/Commercial: AWP × (1 - Discount%) × Capture Rate - Contract Cost
 
     Note: NADAC is per-unit price, Contract Cost is per-package.
     We multiply NADAC by package_size to get per-package NADAC.
@@ -562,23 +645,29 @@ def _calculate_pharmacy_margins(
         nadac_price: NADAC price per unit.
         drug_type: BRAND, SPECIALTY, or GENERIC.
         package_size: Number of units per package (default 1).
+        dispense_fee: Dispense fee to add (default $0).
+        medicaid_markup: Medicaid markup as decimal (default 0).
+        awp_discount: AWP discount as decimal (default 0.15 = 15%).
+        capture_rate: Capture rate as decimal (default 1.0 = 100%).
 
     Returns:
         Tuple of (medicaid_margin, medicare_commercial_margin).
     """
-    # Pharmacy Medicaid: (NADAC per unit × Package Size) - Contract Cost
+    # Pharmacy Medicaid: ((NADAC × Pkg Size) + Dispense Fee) × (1 + Markup%) × Capture Rate - Contract Cost
     if contract_cost is not None and nadac_price is not None:
         nadac_per_package = nadac_price * package_size
-        medicaid_margin = nadac_per_package - contract_cost
+        base = nadac_per_package + dispense_fee
+        revenue = base * (Decimal("1") + medicaid_markup)
+        medicaid_margin = (revenue * capture_rate) - contract_cost
     else:
         medicaid_margin = None
 
-    # Pharmacy Medicare/Commercial: AWP × Rate - Contract Cost
+    # Pharmacy Medicare/Commercial: AWP × (1 - Discount%) × Capture Rate - Contract Cost
     if contract_cost is not None and awp is not None:
-        # Get AWP multiplier based on drug type
-        multiplier = AWP_MULTIPLIERS.get(drug_type.upper(), Decimal("0.85"))
-        revenue = awp * multiplier
-        medicare_commercial_margin = revenue - contract_cost
+        # Apply AWP discount (e.g., 15% discount = multiply by 0.85)
+        awp_multiplier = Decimal("1") - awp_discount
+        revenue = awp * awp_multiplier
+        medicare_commercial_margin = (revenue * capture_rate) - contract_cost
     else:
         medicare_commercial_margin = None
 
