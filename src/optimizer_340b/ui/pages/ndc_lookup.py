@@ -447,6 +447,9 @@ def _process_ndc_lookup(
             medicaid_margin = None
             medicare_commercial_margin = None
 
+        # Floor negative Medicaid margins to $0.00
+        medicaid_display = _format_currency_floor_zero(medicaid_margin)
+
         results.append({
             "Input Drug Name": input_name,
             "NDC11": ndc11,
@@ -455,7 +458,7 @@ def _process_ndc_lookup(
             "Type": drug_type,
             "Contract Cost": _format_currency(contract_cost),
             "AWP": _format_currency(awp),
-            "Pharmacy Medicaid Margin": _format_currency(medicaid_margin),
+            "Pharmacy Medicaid Margin": medicaid_display,
             "Pharmacy Medicare/Commercial Margin": _format_currency(
                 medicare_commercial_margin
             ),
@@ -690,6 +693,24 @@ def _format_currency(value: Decimal | None) -> str:
         return f"${float(value):,.2f}"
     except (ValueError, TypeError):
         return "N/A"
+
+
+def _format_currency_floor_zero(value: Decimal | None) -> str:
+    """Format value as currency, flooring negative/None to $0.00.
+
+    Args:
+        value: Decimal value or None.
+
+    Returns:
+        Formatted string like "$1,234.56" or "$0.00" if negative/None.
+    """
+    if value is None or value < 0:
+        return "$0.00"
+
+    try:
+        return f"${float(value):,.2f}"
+    except (ValueError, TypeError):
+        return "$0.00"
 
 
 def _render_summary_metrics(results_df: pd.DataFrame) -> None:
