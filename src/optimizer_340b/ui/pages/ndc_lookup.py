@@ -6,7 +6,7 @@ product catalog, and output pharmacy channel margins.
 
 import io
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import pandas as pd
 import polars as pl
@@ -37,6 +37,7 @@ def render_ndc_lookup_page() -> None:
     # Check if catalog is loaded
     uploaded = st.session_state.get("uploaded_data", {})
     catalog = uploaded.get("catalog")
+    nadac = uploaded.get("nadac")
 
     if catalog is None:
         st.warning(
@@ -44,6 +45,16 @@ def render_ndc_lookup_page() -> None:
             "Go to **Upload Data** in the sidebar."
         )
         return
+
+    # Show data status
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info(f"Product Catalog: {catalog.height:,} drugs loaded")
+    with col2:
+        if nadac is not None:
+            st.info(f"NADAC Pricing: {nadac.height:,} prices loaded")
+        else:
+            st.warning("NADAC not loaded - Medicaid margins will be N/A")
 
     st.markdown("---")
 
@@ -91,7 +102,7 @@ def render_ndc_lookup_page() -> None:
             # Process button
             if st.button("Calculate Margins", type="primary"):
                 with st.spinner("Processing NDC lookups..."):
-                    results_df = _process_ndc_lookup(input_df, catalog)
+                    results_df = _process_ndc_lookup(input_df, catalog, nadac)
 
                 if results_df is not None and len(results_df) > 0:
                     st.markdown("---")
@@ -225,39 +236,27 @@ def _names_match(str1: str, str2: str) -> bool:
     return s1 == s2
 
 
-def _extract_trade_name(description: str) -> str:
-    """Extract trade name from drug description.
-
-    Takes the first word(s) before common suffixes like MG, ML, TB, etc.
+def _extract_first_word(description: str) -> str:
+    """Extract the first word (trade name) from drug description.
 
     Args:
         description: Full drug description.
 
     Returns:
-        Extracted trade name.
+        First word (trade name) in uppercase.
     """
     if not description:
         return ""
 
-    # Common patterns that indicate end of trade name
-    stop_patterns = [
-        " MG", " MCG", " ML", " TB", " CP", " SY", " VL", " PR", " KT",
-        " IN", " GL", " AP", " SF", " PF", " PPN", " PFS", " SPD",
-        " 0.", " 1.", " 2.", " 3.", " 4.", " 5.", " 6.", " 7.", " 8.", " 9.",
-        " 10", " 20", " 30", " 40", " 50", " 60", " 70", " 80", " 90",
-        " 100", " 200", " 300", " 400", " 500",
-    ]
+    # Get the first word - this is the trade name
+    desc_upper = description.upper().strip()
 
-    desc_upper = description.upper()
+    # Split on whitespace and take first word
+    words = desc_upper.split()
+    if words:
+        return words[0]
 
-    # Find earliest stop pattern
-    earliest_pos = len(desc_upper)
-    for pattern in stop_patterns:
-        pos = desc_upper.find(pattern)
-        if pos > 0 and pos < earliest_pos:
-            earliest_pos = pos
-
-    return desc_upper[:earliest_pos].strip()
+    return ""
 
 
 def _determine_match_status(
@@ -281,11 +280,11 @@ def _determine_match_status(
     if not catalog_name:
         return "NO CATALOG NAME", False
 
-    # Extract trade names for comparison
-    input_trade = _extract_trade_name(input_name)
-    catalog_trade = _extract_trade_name(catalog_name)
+    # Extract first word (trade name) for comparison
+    input_trade = _extract_first_word(input_name)
+    catalog_trade = _extract_first_word(catalog_name)
 
-    # Simple case-insensitive comparison
+    # Simple case-insensitive comparison of first word
     if _names_match(input_trade, catalog_trade):
         return "MATCH", True
     else:
@@ -295,18 +294,23 @@ def _determine_match_status(
 def _process_ndc_lookup(
     input_df: pd.DataFrame,
     catalog: pl.DataFrame,
+    nadac: pl.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Process NDC lookup and calculate margins.
 
     Args:
         input_df: Input DataFrame with drug list.
         catalog: Product catalog DataFrame.
+        nadac: Optional NADAC pricing DataFrame.
 
     Returns:
         Results DataFrame with match status and margins.
     """
     # Build catalog lookup by NDC
     catalog_lookup = _build_catalog_lookup(catalog)
+
+    # Build NADAC lookup if available
+    nadac_lookup = _build_nadac_lookup(nadac) if nadac is not None else {}
 
     results = []
 
@@ -322,6 +326,9 @@ def _process_ndc_lookup(
         # Look up in catalog
         catalog_data = catalog_lookup.get(ndc11)
 
+        # Look up NADAC price
+        nadac_price = nadac_lookup.get(ndc11)
+
         if catalog_data:
             catalog_name = catalog_data.get("drug_name", "")
             contract_cost = catalog_data.get("contract_cost")
@@ -334,7 +341,7 @@ def _process_ndc_lookup(
 
             # Calculate margins if we have pricing
             medicaid_margin, medicare_commercial_margin = _calculate_pharmacy_margins(
-                contract_cost, awp, drug_type
+                contract_cost, awp, nadac_price, drug_type
             )
         else:
             catalog_name = ""
@@ -363,6 +370,23 @@ def _process_ndc_lookup(
     return pd.DataFrame(results)
 
 
+def _find_column(columns: list[str], *candidates: str) -> str | None:
+    """Find a column name from a list of candidates (case-insensitive).
+
+    Args:
+        columns: List of available column names.
+        candidates: Possible column names to search for.
+
+    Returns:
+        Matching column name or None.
+    """
+    columns_upper = {c.upper(): c for c in columns}
+    for candidate in candidates:
+        if candidate.upper() in columns_upper:
+            return columns_upper[candidate.upper()]
+    return None
+
+
 def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
     """Build lookup dictionary from catalog by NDC.
 
@@ -374,15 +398,17 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
     """
     lookup = {}
 
-    # Find column names
-    ndc_col = "NDC" if "NDC" in catalog.columns else None
-    name_col = "Product Description" if "Product Description" in catalog.columns else None
-    cost_col = "Contract Cost" if "Contract Cost" in catalog.columns else None
-    awp_col = "Medispan AWP" if "Medispan AWP" in catalog.columns else None
+    # Find column names (case-insensitive)
+    ndc_col = _find_column(catalog.columns, "NDC", "NDC11", "NDC Code")
+    name_col = _find_column(catalog.columns, "Product Description", "Description", "Drug Name")
+    cost_col = _find_column(catalog.columns, "Contract Cost", "ContractCost", "Cost")
+    awp_col = _find_column(catalog.columns, "Medispan AWP", "AWP", "MedispanAWP", "Medispan_AWP")
 
     if not ndc_col:
-        logger.error("NDC column not found in catalog")
+        logger.error(f"NDC column not found in catalog. Available: {catalog.columns}")
         return lookup
+
+    logger.info(f"Using columns: NDC={ndc_col}, Name={name_col}, Cost={cost_col}, AWP={awp_col}")
 
     for row in catalog.iter_rows(named=True):
         raw_ndc = row.get(ndc_col, "")
@@ -400,13 +426,13 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
         if contract_cost is not None:
             try:
                 contract_cost = Decimal(str(contract_cost))
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, InvalidOperation):
                 contract_cost = None
 
         if awp is not None:
             try:
                 awp = Decimal(str(awp))
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, InvalidOperation):
                 awp = None
 
         # Store first occurrence (or best price)
@@ -433,29 +459,77 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
     return lookup
 
 
+def _build_nadac_lookup(nadac: pl.DataFrame) -> dict[str, Decimal]:
+    """Build NADAC price lookup by NDC.
+
+    Args:
+        nadac: NADAC pricing DataFrame.
+
+    Returns:
+        Dictionary mapping NDC11 to NADAC price.
+    """
+    lookup = {}
+
+    # Find column names
+    ndc_col = _find_column(nadac.columns, "NDC", "ndc", "NDC11")
+    price_col = _find_column(
+        nadac.columns,
+        "NADAC_Per_Unit",
+        "nadac_per_unit",
+        "NADAC",
+        "nadac_price",
+        "Price"
+    )
+
+    if not ndc_col or not price_col:
+        logger.warning(f"NADAC columns not found. Available: {nadac.columns}")
+        return lookup
+
+    for row in nadac.iter_rows(named=True):
+        raw_ndc = row.get(ndc_col, "")
+        ndc11 = _normalize_ndc(raw_ndc)
+
+        if not ndc11:
+            continue
+
+        price = row.get(price_col)
+        if price is not None:
+            try:
+                lookup[ndc11] = Decimal(str(price))
+            except (ValueError, TypeError, InvalidOperation):
+                continue
+
+    logger.info(f"Built NADAC lookup with {len(lookup)} NDCs")
+    return lookup
+
+
 def _calculate_pharmacy_margins(
     contract_cost: Decimal | None,
     awp: Decimal | None,
+    nadac_price: Decimal | None,
     drug_type: str,
 ) -> tuple[Decimal | None, Decimal | None]:
     """Calculate pharmacy channel margins.
 
-    Pharmacy Medicaid: NADAC - Contract Cost (NADAC not in product_catalog, so N/A)
+    Pharmacy Medicaid: NADAC - Contract Cost
     Pharmacy Medicare/Commercial: AWP × Rate - Contract Cost
 
     Args:
         contract_cost: 340B acquisition cost.
         awp: Average Wholesale Price.
+        nadac_price: NADAC price per unit.
         drug_type: BRAND, SPECIALTY, or GENERIC.
 
     Returns:
         Tuple of (medicaid_margin, medicare_commercial_margin).
     """
-    # Pharmacy Medicaid requires NADAC which is not in product_catalog
-    # So we return None for this pathway
-    medicaid_margin = None
+    # Pharmacy Medicaid: NADAC - Contract Cost
+    if contract_cost is not None and nadac_price is not None:
+        medicaid_margin = nadac_price - contract_cost
+    else:
+        medicaid_margin = None
 
-    # Pharmacy Medicare/Commercial
+    # Pharmacy Medicare/Commercial: AWP × Rate - Contract Cost
     if contract_cost is not None and awp is not None:
         # Get AWP multiplier based on drug type
         multiplier = AWP_MULTIPLIERS.get(drug_type.upper(), Decimal("0.85"))
