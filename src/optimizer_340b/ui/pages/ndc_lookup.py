@@ -346,6 +346,7 @@ def _process_ndc_lookup(
             catalog_name = catalog_data.get("drug_name", "")
             contract_cost = catalog_data.get("contract_cost")
             awp = catalog_data.get("awp")
+            package_size = catalog_data.get("package_size", Decimal("1"))
 
             # Determine match status (simple case-insensitive comparison)
             match_status, is_match = _determine_match_status(
@@ -353,8 +354,9 @@ def _process_ndc_lookup(
             )
 
             # Calculate margins if we have pricing
+            # Note: NADAC is per-unit, so multiply by package_size for per-package comparison
             medicaid_margin, medicare_commercial_margin = _calculate_pharmacy_margins(
-                contract_cost, awp, nadac_price, drug_type
+                contract_cost, awp, nadac_price, drug_type, package_size
             )
         else:
             catalog_name = ""
@@ -416,12 +418,13 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
     name_col = _find_column(catalog.columns, "Product Description", "Description", "Drug Name")
     cost_col = _find_column(catalog.columns, "Contract Cost", "ContractCost", "Cost")
     awp_col = _find_column(catalog.columns, "Medispan AWP", "AWP", "MedispanAWP", "Medispan_AWP")
+    pkg_size_col = _find_column(catalog.columns, "Package Size", "PackageSize", "Pkg Size", "Size")
 
     if not ndc_col:
         logger.error(f"NDC column not found in catalog. Available: {catalog.columns}")
         return lookup
 
-    logger.info(f"Using columns: NDC={ndc_col}, Name={name_col}, Cost={cost_col}, AWP={awp_col}")
+    logger.info(f"Using columns: NDC={ndc_col}, Name={name_col}, Cost={cost_col}, AWP={awp_col}, PkgSize={pkg_size_col}")
 
     for row in catalog.iter_rows(named=True):
         raw_ndc = row.get(ndc_col, "")
@@ -434,6 +437,7 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
         drug_name = str(row.get(name_col, "")) if name_col else ""
         contract_cost = row.get(cost_col) if cost_col else None
         awp = row.get(awp_col) if awp_col else None
+        package_size = row.get(pkg_size_col) if pkg_size_col else None
 
         # Convert to Decimal if numeric
         if contract_cost is not None:
@@ -448,12 +452,23 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
             except (ValueError, TypeError, InvalidOperation):
                 awp = None
 
+        if package_size is not None:
+            try:
+                package_size = Decimal(str(package_size))
+                if package_size <= 0:
+                    package_size = Decimal("1")
+            except (ValueError, TypeError, InvalidOperation):
+                package_size = Decimal("1")
+        else:
+            package_size = Decimal("1")
+
         # Store first occurrence (or best price)
         if ndc11 not in lookup:
             lookup[ndc11] = {
                 "drug_name": drug_name,
                 "contract_cost": contract_cost,
                 "awp": awp,
+                "package_size": package_size,
             }
         else:
             # Keep the one with lower contract cost (best 340B price)
@@ -466,6 +481,7 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
                     "drug_name": drug_name,
                     "contract_cost": contract_cost,
                     "awp": awp,
+                    "package_size": package_size,
                 }
 
     logger.info(f"Built catalog lookup with {len(lookup)} unique NDCs")
@@ -530,24 +546,30 @@ def _calculate_pharmacy_margins(
     awp: Decimal | None,
     nadac_price: Decimal | None,
     drug_type: str,
+    package_size: Decimal = Decimal("1"),
 ) -> tuple[Decimal | None, Decimal | None]:
     """Calculate pharmacy channel margins.
 
-    Pharmacy Medicaid: NADAC - Contract Cost
+    Pharmacy Medicaid: (NADAC × Package Size) - Contract Cost
     Pharmacy Medicare/Commercial: AWP × Rate - Contract Cost
 
+    Note: NADAC is per-unit price, Contract Cost is per-package.
+    We multiply NADAC by package_size to get per-package NADAC.
+
     Args:
-        contract_cost: 340B acquisition cost.
-        awp: Average Wholesale Price.
+        contract_cost: 340B acquisition cost (per package).
+        awp: Average Wholesale Price (per package).
         nadac_price: NADAC price per unit.
         drug_type: BRAND, SPECIALTY, or GENERIC.
+        package_size: Number of units per package (default 1).
 
     Returns:
         Tuple of (medicaid_margin, medicare_commercial_margin).
     """
-    # Pharmacy Medicaid: NADAC - Contract Cost
+    # Pharmacy Medicaid: (NADAC per unit × Package Size) - Contract Cost
     if contract_cost is not None and nadac_price is not None:
-        medicaid_margin = nadac_price - contract_cost
+        nadac_per_package = nadac_price * package_size
+        medicaid_margin = nadac_per_package - contract_cost
     else:
         medicaid_margin = None
 
