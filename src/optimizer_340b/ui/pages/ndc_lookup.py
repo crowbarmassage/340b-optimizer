@@ -330,13 +330,17 @@ def _extract_first_word(description: str) -> str:
 def _determine_match_status(
     input_name: str,
     catalog_name: str | None,
+    generic_name: str | None,
     ndc_found: bool,
 ) -> tuple[str, bool]:
     """Determine match status based on drug name comparison.
 
+    Checks input name against both Product Description and Generic Name.
+
     Args:
         input_name: User's drug name.
-        catalog_name: Catalog drug name (None if NDC not found).
+        catalog_name: Catalog Product Description (None if NDC not found).
+        generic_name: Catalog Generic Name (None if not available).
         ndc_found: Whether NDC was found in catalog.
 
     Returns:
@@ -345,18 +349,25 @@ def _determine_match_status(
     if not ndc_found:
         return "NDC NOT FOUND", False
 
-    if not catalog_name:
+    if not catalog_name and not generic_name:
         return "NO CATALOG NAME", False
 
     # Extract first word (trade name) for comparison
     input_trade = _extract_first_word(input_name)
-    catalog_trade = _extract_first_word(catalog_name)
 
-    # Simple case-insensitive comparison of first word
-    if _names_match(input_trade, catalog_trade):
-        return "MATCH", True
-    else:
-        return "MISMATCH - VERIFY", False
+    # Check against Product Description
+    if catalog_name:
+        catalog_trade = _extract_first_word(catalog_name)
+        if _names_match(input_trade, catalog_trade):
+            return "MATCH", True
+
+    # Check against Generic Name
+    if generic_name:
+        generic_trade = _extract_first_word(generic_name)
+        if _names_match(input_trade, generic_trade):
+            return "MATCH (GENERIC)", True
+
+    return "MISMATCH - VERIFY", False
 
 
 def _process_ndc_lookup(
@@ -415,13 +426,14 @@ def _process_ndc_lookup(
 
         if catalog_data:
             catalog_name = catalog_data.get("drug_name", "")
+            generic_name = catalog_data.get("generic_name", "")
             contract_cost = catalog_data.get("contract_cost")
             awp = catalog_data.get("awp")
             package_size = catalog_data.get("package_size", Decimal("1"))
 
-            # Determine match status (simple case-insensitive comparison)
+            # Determine match status (checks both Product Description and Generic Name)
             match_status, is_match = _determine_match_status(
-                input_name, catalog_name, True
+                input_name, catalog_name, generic_name, True
             )
 
             # Calculate margins if we have pricing
@@ -442,7 +454,7 @@ def _process_ndc_lookup(
             contract_cost = None
             awp = None
             match_status, is_match = _determine_match_status(
-                input_name, None, False
+                input_name, None, None, False
             )
             medicaid_margin = None
             medicare_commercial_margin = None
@@ -501,6 +513,7 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
     # Find column names (case-insensitive)
     ndc_col = _find_column(catalog.columns, "NDC", "NDC11", "NDC Code")
     name_col = _find_column(catalog.columns, "Product Description", "Description", "Drug Name")
+    generic_col = _find_column(catalog.columns, "Generic Name", "GenericName", "Generic")
     cost_col = _find_column(catalog.columns, "Contract Cost", "ContractCost", "Cost")
     awp_col = _find_column(catalog.columns, "Medispan AWP", "AWP", "MedispanAWP", "Medispan_AWP")
     pkg_size_col = _find_column(catalog.columns, "Package Size", "PackageSize", "Pkg Size", "Size")
@@ -509,7 +522,7 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
         logger.error(f"NDC column not found in catalog. Available: {catalog.columns}")
         return lookup
 
-    logger.info(f"Using columns: NDC={ndc_col}, Name={name_col}, Cost={cost_col}, AWP={awp_col}, PkgSize={pkg_size_col}")
+    logger.info(f"Using columns: NDC={ndc_col}, Name={name_col}, Generic={generic_col}, Cost={cost_col}, AWP={awp_col}, PkgSize={pkg_size_col}")
 
     for row in catalog.iter_rows(named=True):
         raw_ndc = row.get(ndc_col, "")
@@ -520,6 +533,7 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
 
         # Get values
         drug_name = str(row.get(name_col, "")) if name_col else ""
+        generic_name = str(row.get(generic_col, "")) if generic_col else ""
         contract_cost = row.get(cost_col) if cost_col else None
         awp = row.get(awp_col) if awp_col else None
         package_size = row.get(pkg_size_col) if pkg_size_col else None
@@ -551,6 +565,7 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
         if ndc11 not in lookup:
             lookup[ndc11] = {
                 "drug_name": drug_name,
+                "generic_name": generic_name,
                 "contract_cost": contract_cost,
                 "awp": awp,
                 "package_size": package_size,
@@ -564,6 +579,7 @@ def _build_catalog_lookup(catalog: pl.DataFrame) -> dict[str, dict]:
             ):
                 lookup[ndc11] = {
                     "drug_name": drug_name,
+                    "generic_name": generic_name,
                     "contract_cost": contract_cost,
                     "awp": awp,
                     "package_size": package_size,
