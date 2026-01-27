@@ -30,6 +30,7 @@ def main() -> None:
     from optimizer_340b.ui.pages.dashboard import render_dashboard_page
     from optimizer_340b.ui.pages.drug_detail import render_drug_detail_page
     from optimizer_340b.ui.pages.manual_upload import render_manual_upload_page
+    from optimizer_340b.ui.pages.ndc_lookup import render_ndc_lookup_page
     from optimizer_340b.ui.pages.upload import render_upload_page
 
     # Page configuration - must be first Streamlit command
@@ -45,6 +46,7 @@ def main() -> None:
         "Upload Data": render_upload_page,
         "Dashboard": render_dashboard_page,
         "Drug Detail": render_drug_detail_page,
+        "NDC Lookup": render_ndc_lookup_page,
         "Manual Upload": render_manual_upload_page,
     }
 
