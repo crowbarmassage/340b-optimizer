@@ -447,8 +447,11 @@ def _process_ndc_lookup(
             medicaid_margin = None
             medicare_commercial_margin = None
 
-        # Floor negative Medicaid margins to $0.00
-        medicaid_display = _format_currency_floor_zero(medicaid_margin)
+        # Floor negative/N/A Medicaid margins to $0.00 only if Medicare/Commercial is available
+        if medicare_commercial_margin is not None:
+            medicaid_display = _format_currency_floor_zero(medicaid_margin)
+        else:
+            medicaid_display = _format_currency(medicaid_margin)
 
         results.append({
             "Input Drug Name": input_name,
