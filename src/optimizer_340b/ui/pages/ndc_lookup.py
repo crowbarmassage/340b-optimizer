@@ -147,7 +147,12 @@ def _parse_input_csv(uploaded_file) -> pd.DataFrame | None:
         content = uploaded_file.getvalue().decode("utf-8")
 
         # Check if it has headers
-        first_line = content.split("\n")[0].strip()
+        first_line = content.split("\n")[0].strip().upper()
+
+        # Common header keywords that indicate row is a header
+        header_keywords = [
+            "DRUG", "DESC", "NDC", "TYPE", "PRODUCT", "MED_DESC", "NAME"
+        ]
 
         # If no comma in first line, try tab-separated
         if "," not in first_line:
@@ -157,8 +162,8 @@ def _parse_input_csv(uploaded_file) -> pd.DataFrame | None:
                 header=None,
                 names=["Drug Description", "NDC11", "Type", "Product Description"],
             )
-        elif "Drug Description" in first_line or "drug" in first_line.lower():
-            # Has headers
+        elif any(kw in first_line for kw in header_keywords):
+            # Has headers - read with header row
             df = pd.read_csv(io.StringIO(content))
         else:
             # No headers, assign column names
@@ -320,6 +325,14 @@ def _process_ndc_lookup(
         drug_type = str(row.get("Type", "BRAND")).upper().strip()
         expected_desc = str(row.get("Product Description", "")).strip()
 
+        # Skip header-like rows (NDC contains no digits or is a column name)
+        raw_ndc_str = str(raw_ndc).upper().strip()
+        if not any(c.isdigit() for c in raw_ndc_str) or raw_ndc_str in (
+            "NDC", "NDC11", "NDC_CODE", "NDC CODE"
+        ):
+            logger.debug(f"Skipping header-like row: {raw_ndc_str}")
+            continue
+
         # Normalize NDC
         ndc11 = _normalize_ndc(raw_ndc)
 
@@ -470,20 +483,29 @@ def _build_nadac_lookup(nadac: pl.DataFrame) -> dict[str, Decimal]:
     """
     lookup = {}
 
-    # Find column names
-    ndc_col = _find_column(nadac.columns, "NDC", "ndc", "NDC11")
+    logger.info(f"NADAC columns available: {nadac.columns}")
+
+    # Find column names - try many variations
+    ndc_col = _find_column(
+        nadac.columns,
+        "ndc", "NDC", "NDC11", "ndc11", "NDC_Code", "ndc_code",
+        "NDC Description", "ndc_description"
+    )
+    # Use last_price as the current NADAC price (most recent)
     price_col = _find_column(
         nadac.columns,
-        "NADAC_Per_Unit",
-        "nadac_per_unit",
-        "NADAC",
-        "nadac_price",
-        "Price"
+        "last_price", "Last Price", "last_nadac",
+        "NADAC_Per_Unit", "nadac_per_unit", "NADAC Per Unit",
+        "NADAC", "nadac", "nadac_price", "Price", "price",
+        "mean_price", "median_price"
     )
 
     if not ndc_col or not price_col:
-        logger.warning(f"NADAC columns not found. Available: {nadac.columns}")
+        logger.warning(f"NADAC columns not found. NDC col: {ndc_col}, Price col: {price_col}")
+        logger.warning(f"Available columns: {nadac.columns}")
         return lookup
+
+    logger.info(f"Using NADAC columns: NDC={ndc_col}, Price={price_col}")
 
     for row in nadac.iter_rows(named=True):
         raw_ndc = row.get(ndc_col, "")
