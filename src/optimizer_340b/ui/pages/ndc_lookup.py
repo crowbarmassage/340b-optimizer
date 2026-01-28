@@ -656,32 +656,27 @@ def _calculate_pharmacy_margins(
 ) -> tuple[Decimal | None, Decimal | None]:
     """Calculate pharmacy channel margins.
 
-    Pharmacy Medicaid: ((NADAC × Pkg Size) + Dispense Fee) × (1 + Markup%) × Capture Rate - Contract Cost
+    Pharmacy Medicaid: AWP × 0.84 × Capture Rate - Contract Cost
     Pharmacy Medicare/Commercial: AWP × (1 - Discount%) × Capture Rate - Contract Cost
-
-    Note: NADAC is per-unit price, Contract Cost is per-package.
-    We multiply NADAC by package_size to get per-package NADAC.
 
     Args:
         contract_cost: 340B acquisition cost (per package).
         awp: Average Wholesale Price (per package).
-        nadac_price: NADAC price per unit.
+        nadac_price: NADAC price per unit (not used for Medicaid in NDC Lookup).
         drug_type: BRAND, SPECIALTY, or GENERIC.
         package_size: Number of units per package (default 1).
-        dispense_fee: Dispense fee to add (default $0).
-        medicaid_markup: Medicaid markup as decimal (default 0).
+        dispense_fee: Dispense fee (not used in NDC Lookup).
+        medicaid_markup: Medicaid markup (not used in NDC Lookup).
         awp_discount: AWP discount as decimal (default 0.15 = 15%).
         capture_rate: Capture rate as decimal (default 1.0 = 100%).
 
     Returns:
         Tuple of (medicaid_margin, medicare_commercial_margin).
     """
-    # Pharmacy Medicaid: ((NADAC × Pkg Size) + Dispense Fee) × (1 + Markup%) × Capture Rate - Contract Cost
-    if contract_cost is not None and nadac_price is not None:
-        nadac_per_package = nadac_price * package_size
-        base = nadac_per_package + dispense_fee
-        revenue = base * (Decimal("1") + medicaid_markup)
-        medicaid_margin = (revenue * capture_rate) - contract_cost
+    # Pharmacy Medicaid: AWP × 0.84 × Capture Rate - Contract Cost
+    if contract_cost is not None and awp is not None:
+        medicaid_revenue = awp * Decimal("0.84") * capture_rate
+        medicaid_margin = medicaid_revenue - contract_cost
     else:
         medicaid_margin = None
 
