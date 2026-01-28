@@ -122,12 +122,13 @@ def render_ndc_lookup_page() -> None:
             2. `NDC11` - NDC code (will be left-padded to 11 digits)
             3. `Type` - BRAND, SPECIALTY, or GENERIC
             4. `Product Description` - Expected catalog description (optional)
+            5. `HCPCS` - HCPCS/J-code (optional)
 
             **Example:**
             ```
-            Drug Description,NDC11,Type,Product Description
-            HUMIRA PEN 40 MG/0.8ML,74433902,SPECIALTY,HUMIRA PEN KT 40MG/0.8ML 2
-            ELIQUIS 5 MG TABLET,3089421,BRAND,ELIQUIS TB 5MG 60
+            Drug Description,NDC11,Type,Product Description,HCPCS
+            HUMIRA PEN 40 MG/0.8ML,74433902,SPECIALTY,HUMIRA PEN KT 40MG/0.8ML 2,J0135
+            ELIQUIS 5 MG TABLET,3089421,BRAND,ELIQUIS TB 5MG 60,
             ```
             """
         )
@@ -197,7 +198,7 @@ def render_ndc_lookup_page() -> None:
 def _parse_input_csv(uploaded_file) -> pd.DataFrame | None:
     """Parse the uploaded CSV file.
 
-    Expected columns: Drug Description, NDC11, Type, Product Description
+    Expected columns: Drug Description, NDC11, Type, Product Description, HCPCS (optional)
 
     Args:
         uploaded_file: Streamlit uploaded file object.
@@ -214,8 +215,11 @@ def _parse_input_csv(uploaded_file) -> pd.DataFrame | None:
 
         # Common header keywords that indicate row is a header
         header_keywords = [
-            "DRUG", "DESC", "NDC", "TYPE", "PRODUCT", "MED_DESC", "NAME"
+            "DRUG", "DESC", "NDC", "TYPE", "PRODUCT", "MED_DESC", "NAME", "HCPCS"
         ]
+
+        # Standard column names (5 columns)
+        standard_cols = ["Drug Description", "NDC11", "Type", "Product Description", "HCPCS"]
 
         # If no comma in first line, try tab-separated
         if "," not in first_line:
@@ -223,26 +227,19 @@ def _parse_input_csv(uploaded_file) -> pd.DataFrame | None:
                 io.StringIO(content),
                 sep="\t",
                 header=None,
-                names=["Drug Description", "NDC11", "Type", "Product Description"],
+                names=standard_cols[:4],
             )
         elif any(kw in first_line for kw in header_keywords):
             # Has headers - read with header row
             df = pd.read_csv(io.StringIO(content))
         else:
-            # No headers, assign column names
-            df = pd.read_csv(
-                io.StringIO(content),
-                header=None,
-                names=["Drug Description", "NDC11", "Type", "Product Description"],
-            )
+            # No headers, assign column names based on number of columns
+            df = pd.read_csv(io.StringIO(content), header=None)
+            df.columns = standard_cols[: len(df.columns)]
 
-        # Standardize column names
-        df.columns = [
-            "Drug Description",
-            "NDC11",
-            "Type",
-            "Product Description",
-        ][: len(df.columns)]
+        # Standardize column names if they don't match expected
+        if len(df.columns) >= 4 and "Drug Description" not in df.columns:
+            df.columns = standard_cols[: len(df.columns)]
 
         # Ensure we have at least the required columns
         if len(df.columns) < 2:
@@ -254,6 +251,8 @@ def _parse_input_csv(uploaded_file) -> pd.DataFrame | None:
             df["Type"] = "BRAND"
         if "Product Description" not in df.columns:
             df["Product Description"] = ""
+        if "HCPCS" not in df.columns:
+            df["HCPCS"] = ""
 
         return df
 
@@ -406,6 +405,7 @@ def _process_ndc_lookup(
         raw_ndc = row.get("NDC11", "")
         drug_type = str(row.get("Type", "BRAND")).upper().strip()
         expected_desc = str(row.get("Product Description", "")).strip()
+        hcpcs = str(row.get("HCPCS", "")).strip() if pd.notna(row.get("HCPCS")) else ""
 
         # Skip header-like rows (NDC contains no digits or is a column name)
         raw_ndc_str = str(raw_ndc).upper().strip()
@@ -468,6 +468,7 @@ def _process_ndc_lookup(
         results.append({
             "Input Drug Name": input_name,
             "NDC11": ndc11,
+            "HCPCS": hcpcs,
             "Match Status": match_status,
             "Catalog Description": catalog_name,
             "Type": drug_type,
